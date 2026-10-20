@@ -116,70 +116,84 @@ class RegistryKeeper(BaseAgent):
         if isinstance(inputs, dict):
             inputs = RegistryKeeperInput.model_validate(inputs)
 
+        t0 = self.log_started({
+            "structure_proposals": len(inputs.update_proposals_from_structure_mapper),
+            "relationship_proposals": len(inputs.update_proposals_from_relationship_linker),
+            "data_service_proposals": len(inputs.update_proposals_from_data_service_mapper),
+            "git_diffs": len(inputs.git_diffs),
+            "lookups": len(inputs.lookups),
+        })
+
         updated_nodes: Dict[str, RegistryNode] = {}
         unresolved_items: List[UnresolvedItem] = []
         change_logs: List[ChangeLogEntry] = []
 
-        # ----------------------------------------------------------------------
-        # 1. Process Git Diffs & Deleted / Renamed Files
-        # ----------------------------------------------------------------------
-        self._process_git_diffs_and_deletions(
-            git_diffs=inputs.git_diffs,
-            deleted_or_renamed_files=inputs.deleted_or_renamed_files,
-            change_logs=change_logs,
-        )
+        try:
+            # ----------------------------------------------------------------------
+            # 1. Process Git Diffs & Deleted / Renamed Files
+            # ----------------------------------------------------------------------
+            self._process_git_diffs_and_deletions(
+                git_diffs=inputs.git_diffs,
+                deleted_or_renamed_files=inputs.deleted_or_renamed_files,
+                change_logs=change_logs,
+            )
 
-        # ----------------------------------------------------------------------
-        # 2. Process Proposals from Structure Mapper (Agent 4: Nodes)
-        # ----------------------------------------------------------------------
-        self._process_structure_mapper_proposals(
-            proposals=inputs.update_proposals_from_structure_mapper,
-            updated_nodes=updated_nodes,
-            unresolved_items=unresolved_items,
-            change_logs=change_logs,
-        )
+            # ----------------------------------------------------------------------
+            # 2. Process Proposals from Structure Mapper (Agent 4: Nodes)
+            # ----------------------------------------------------------------------
+            self._process_structure_mapper_proposals(
+                proposals=inputs.update_proposals_from_structure_mapper,
+                updated_nodes=updated_nodes,
+                unresolved_items=unresolved_items,
+                change_logs=change_logs,
+            )
 
-        # ----------------------------------------------------------------------
-        # 3. Process Proposals from Relationship Linker (Agent 5: Code Edges)
-        # ----------------------------------------------------------------------
-        self._process_relationship_linker_proposals(
-            proposals=inputs.update_proposals_from_relationship_linker,
-            updated_nodes=updated_nodes,
-            unresolved_items=unresolved_items,
-            change_logs=change_logs,
-        )
+            # ----------------------------------------------------------------------
+            # 3. Process Proposals from Relationship Linker (Agent 5: Code Edges)
+            # ----------------------------------------------------------------------
+            self._process_relationship_linker_proposals(
+                proposals=inputs.update_proposals_from_relationship_linker,
+                updated_nodes=updated_nodes,
+                unresolved_items=unresolved_items,
+                change_logs=change_logs,
+            )
 
-        # ----------------------------------------------------------------------
-        # 4. Process Proposals from Data & Service Mapper (Agent 6: System Edges)
-        # ----------------------------------------------------------------------
-        self._process_data_service_mapper_proposals(
-            proposals=inputs.update_proposals_from_data_service_mapper,
-            updated_nodes=updated_nodes,
-            unresolved_items=unresolved_items,
-            change_logs=change_logs,
-        )
+            # ----------------------------------------------------------------------
+            # 4. Process Proposals from Data & Service Mapper (Agent 6: System Edges)
+            # ----------------------------------------------------------------------
+            self._process_data_service_mapper_proposals(
+                proposals=inputs.update_proposals_from_data_service_mapper,
+                updated_nodes=updated_nodes,
+                unresolved_items=unresolved_items,
+                change_logs=change_logs,
+            )
 
-        # ----------------------------------------------------------------------
-        # 5. Answer Lookup Queries
-        # ----------------------------------------------------------------------
-        lookup_answers = self._answer_lookups(inputs.lookups)
+            # ----------------------------------------------------------------------
+            # 5. Answer Lookup Queries
+            # ----------------------------------------------------------------------
+            lookup_answers = self._answer_lookups(inputs.lookups)
 
-        # Compile statistics
-        stats = {
-            "total_active_nodes": self.store.count(include_deleted=False),
-            "updated_nodes_count": len(updated_nodes),
-            "unresolved_items_count": len(unresolved_items),
-            "change_log_entries_count": len(change_logs),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            # Compile statistics
+            stats = {
+                "total_active_nodes": self.store.count(include_deleted=False),
+                "updated_nodes_count": len(updated_nodes),
+                "unresolved_items_count": len(unresolved_items),
+                "change_log_entries_count": len(change_logs),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-        return RegistryKeeperOutput(
-            updated_registry=list(updated_nodes.values()),
-            lookup_answers=lookup_answers,
-            unresolved_items_list=unresolved_items,
-            change_log=change_logs,
-            stats=stats,
-        )
+            self.log_completed(t0, stats)
+
+            return RegistryKeeperOutput(
+                updated_registry=list(updated_nodes.values()),
+                lookup_answers=lookup_answers,
+                unresolved_items_list=unresolved_items,
+                change_log=change_logs,
+                stats=stats,
+            )
+        except Exception as e:
+            self.log_failed(t0, e)
+            raise
 
     # --------------------------------------------------------------------------
     # Subroutines

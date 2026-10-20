@@ -11,3 +11,6 @@ data/
 *.db
 *.sqlite3
 .registry/
+.logs/
+logs/
+*.log

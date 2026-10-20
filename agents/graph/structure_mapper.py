@@ -109,39 +109,52 @@ class StructureMapper(BaseAgent):
         shard = self._resolve_shard(inputs.repo_shard)
         lang_configs = inputs.language_configs or DEFAULT_LANGUAGE_CONFIGS
 
-        # 2. Collect target files
-        files_to_scan = self._get_shard_files(shard, lang_configs)
+        t0 = self.log_started({"shard_id": shard.shard_id, "root_path": shard.root_path})
 
-        # 3. Extract nodes using tree_sitter tool
-        all_nodes: List[RegistryNode] = []
-        for file_path in files_to_scan:
-            extracted = self.tree_sitter_tool.parse_file(file_path)
-            # 4. Enrich with SCIP symbols
-            enriched = self.scip_tool.enrich_nodes(extracted)
-            all_nodes.extend(enriched)
+        try:
+            # 2. Collect target files
+            files_to_scan = self._get_shard_files(shard, lang_configs)
+            self.log_event("shard.scanned", f"Identified {len(files_to_scan)} source files in shard '{shard.shard_id}'", count=len(files_to_scan))
 
-        # 5. Build proposals using registry.propose
-        proposals = self.propose_tool.build_proposals(
-            nodes=all_nodes,
-            lookup_tool=self.lookup_tool,
-            only_changed=inputs.only_changed,
-        )
+            # 3. Extract nodes using tree_sitter tool
+            all_nodes: List[RegistryNode] = []
+            for file_path in files_to_scan:
+                extracted = self.tree_sitter_tool.parse_file(file_path)
+                # 4. Enrich with SCIP symbols
+                enriched = self.scip_tool.enrich_nodes(extracted)
+                all_nodes.extend(enriched)
 
-        stats = {
-            "shard_id": shard.shard_id,
-            "root_path": shard.root_path,
-            "files_scanned": len(files_to_scan),
-            "total_nodes_extracted": len(all_nodes),
-            "proposals_generated": len(proposals),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            self.log_event("nodes.extracted", f"Extracted {len(all_nodes)} nodes with AST & SCIP symbols", count=len(all_nodes))
 
-        return StructureMapperOutput(
-            shard_id=shard.shard_id,
-            nodes=all_nodes,
-            registry_update_proposals=proposals,
-            stats=stats,
-        )
+            # 5. Build proposals using registry.propose
+            proposals = self.propose_tool.build_proposals(
+                nodes=all_nodes,
+                lookup_tool=self.lookup_tool,
+                only_changed=inputs.only_changed,
+            )
+
+            self.log_event("proposals.generated", f"Formulated {len(proposals)} registry update proposals", count=len(proposals))
+
+            stats = {
+                "shard_id": shard.shard_id,
+                "root_path": shard.root_path,
+                "files_scanned": len(files_to_scan),
+                "total_nodes_extracted": len(all_nodes),
+                "proposals_generated": len(proposals),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            self.log_completed(t0, stats)
+
+            return StructureMapperOutput(
+                shard_id=shard.shard_id,
+                nodes=all_nodes,
+                registry_update_proposals=proposals,
+                stats=stats,
+            )
+        except Exception as e:
+            self.log_failed(t0, e)
+            raise
 
     def map_and_register(
         self,

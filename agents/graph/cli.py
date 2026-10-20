@@ -12,6 +12,7 @@ from typing import Optional
 
 from agents.graph.registry_keeper import RegistryKeeper
 from agents.graph.structure_mapper import StructureMapper
+from core.logger import AgentLogger, agent_logger
 from models.registry import NodeType
 from models.structure import RepoShard, StructureMapperInput
 from storage.registry_store import CodeRegistryStore
@@ -73,6 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
     shard_parser.add_argument("shard_path", help="Path to shard folder or file")
     shard_parser.add_argument("--register", action="store_true", help="Immediately register proposals with Registry Keeper")
     shard_parser.add_argument("--only-changed", action="store_true", help="Only propose modified or new nodes")
+
+    # agent logs
+    logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
+    logs_parser.add_argument("--limit", type=int, default=30, help="Number of log records to show (default: 30)")
+    logs_parser.add_argument("--agent", default=None, help="Filter by agent ID (e.g., 'registry_keeper')")
+    logs_parser.add_argument("--layer", default=None, help="Filter by layer (e.g., 'graph')")
+    logs_parser.add_argument("--level", default=None, help="Filter by level (INFO, WARNING, ERROR)")
+    logs_parser.add_argument("--raw", action="store_true", help="Print raw JSON format")
 
     return parser
 
@@ -177,6 +186,23 @@ def main():
                 print(f"     [{p.action.value.upper()}] {p.node.id if p.node else p.proposal_id}")
             if len(output.registry_update_proposals) > 10:
                 print(f"     ... and {len(output.registry_update_proposals) - 10} more")
+
+    elif args.command == "logs":
+        records = agent_logger.get_recent_logs(
+            limit=args.limit,
+            agent_id=args.agent,
+            layer=args.layer,
+            level=args.level,
+        )
+        if not records:
+            print("📭 No agent logs found.")
+        else:
+            print(f"📜 Showing last {len(records)} agent events:")
+            for r in records:
+                if args.raw:
+                    print(json.dumps(r.model_dump()))
+                else:
+                    agent_logger._write_to_console(r)
 
 
 if __name__ == "__main__":

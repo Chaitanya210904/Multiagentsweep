@@ -6,6 +6,7 @@ from .exceptions import (
     RegistryDuplicateError,
     ValidationError,
 )
+from .logger import AgentLogger, AgentLogRecord, agent_logger
 
 __all__ = [
     "MultiAgentError",
@@ -14,4 +15,7 @@ __all__ = [
     "RegistryNotFoundError",
     "RegistryDuplicateError",
     "ValidationError",
+    "AgentLogger",
+    "AgentLogRecord",
+    "agent_logger",
 ]
