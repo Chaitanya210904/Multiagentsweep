@@ -9,9 +9,14 @@ Model Tier: small
 Trigger: first on every commit; on every update proposal
 """
 
+import ast
 from datetime import datetime, timezone
+import hashlib
+import json
 import logging
-from typing import Any, Dict, List, Optional
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 from agents.base import AgentMetadata, BaseAgent
 from core.exceptions import UnauthorizedAccessError
@@ -478,3 +483,223 @@ class RegistryKeeper(BaseAgent):
                 )
                 answers[query_key] = matches[0] if matches else None
         return answers
+
+    # --------------------------------------------------------------------------
+    # Production Ready Utilities: Real Repository Scanning & Git Sync
+    # --------------------------------------------------------------------------
+
+    def scan_repository(
+        self,
+        repo_path: Optional[str] = None,
+        exclude_dirs: Optional[List[str]] = None,
+        source_agent: str = "structure_mapper",
+    ) -> RegistryKeeperOutput:
+        """
+        Scans a real repository filesystem, extracts all files, classes, and functions,
+        computes real cryptographic SHA-256 hashes, and updates the registry.
+        """
+        target_dir = Path(repo_path).resolve() if repo_path else self.git_tool.repo_root
+        excluded = set(exclude_dirs or [
+            ".git",
+            ".venv",
+            "venv",
+            "__pycache__",
+            ".pytest_cache",
+            "node_modules",
+            ".registry",
+            "dist",
+            "build",
+            ".egg-info",
+        ])
+
+        proposals: List[UpdateProposal] = []
+
+        for root, dirs, files in os.walk(target_dir):
+            dirs[:] = [d for d in dirs if d not in excluded and not d.startswith(".")]
+            
+            for file_name in files:
+                if file_name.startswith("."):
+                    continue
+                file_full = Path(root) / file_name
+                nodes = extract_nodes_from_disk(file_full, target_dir)
+                for node in nodes:
+                    proposals.append(
+                        UpdateProposal(
+                            source_agent=source_agent,
+                            action=ChangeAction.CREATE,
+                            node=node,
+                            details={"scanned_from_disk": True},
+                        )
+                    )
+
+        inputs = RegistryKeeperInput(update_proposals_from_structure_mapper=proposals)
+        return self.execute(inputs)
+
+    def sync_with_git(
+        self,
+        base_commit: Optional[str] = None,
+        target_commit: Optional[str] = None,
+        staged: bool = False,
+        source_agent: str = "structure_mapper",
+    ) -> RegistryKeeperOutput:
+        """
+        Queries real git diff from the local repository, parses added, modified,
+        renamed, or deleted files, parses code nodes from changed files, and reconciles the registry.
+        """
+        diff_entries = self.git_tool.get_diff_entries(
+            base_commit=base_commit,
+            target_commit=target_commit,
+            staged=staged,
+        )
+
+        structure_proposals: List[UpdateProposal] = []
+        git_diffs: List[GitDiffEntry] = []
+
+        for diff in diff_entries:
+            git_diffs.append(diff)
+            change = diff.change_type.upper()
+
+            if change in ("A", "M"):
+                file_path = self.git_tool.repo_root / diff.path
+                if file_path.is_file():
+                    nodes = extract_nodes_from_disk(file_path, self.git_tool.repo_root)
+                    for node in nodes:
+                        structure_proposals.append(
+                            UpdateProposal(
+                                source_agent=source_agent,
+                                action=ChangeAction.UPDATE if change == "M" else ChangeAction.CREATE,
+                                node=node,
+                                details={"git_change": change},
+                            )
+                        )
+
+        inputs = RegistryKeeperInput(
+            update_proposals_from_structure_mapper=structure_proposals,
+            git_diffs=git_diffs,
+        )
+        return self.execute(inputs)
+
+    def apply_proposals_file(self, file_path: str) -> RegistryKeeperOutput:
+        """Loads and applies real proposals from a JSON file."""
+        path = Path(file_path).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Proposals file not found: {file_path}")
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        inputs = RegistryKeeperInput.model_validate(data)
+        return self.execute(inputs)
+
+
+def extract_nodes_from_disk(file_path: Path, repo_root: Path) -> List[RegistryNode]:
+    """Inspects a real file on disk and extracts RegistryNode objects (file, classes, functions)."""
+    try:
+        rel_path = str(file_path.relative_to(repo_root))
+    except ValueError:
+        rel_path = str(file_path)
+
+    if not file_path.is_file():
+        return []
+
+    try:
+        raw_bytes = file_path.read_bytes()
+        file_hash = hashlib.sha256(raw_bytes).hexdigest()
+    except Exception:
+        return []
+
+    stat = file_path.stat()
+    file_node = RegistryNode(
+        id=f"file:{rel_path}",
+        name=file_path.name,
+        type=NodeType.FILE,
+        location=NodeLocation(path=rel_path),
+        hash=file_hash,
+        metadata={
+            "size_bytes": stat.st_size,
+            "modified_time": stat.st_mtime,
+            "extension": file_path.suffix,
+        },
+    )
+
+    nodes = [file_node]
+
+    # If python file, parse AST to extract real functions and classes
+    if file_path.suffix == ".py":
+        try:
+            content = raw_bytes.decode("utf-8")
+            tree = ast.parse(content, filename=rel_path)
+            lines = content.splitlines()
+
+            for item in tree.body:
+                if isinstance(item, ast.ClassDef):
+                    class_lines = "\n".join(lines[item.lineno - 1 : item.end_lineno])
+                    class_hash = hashlib.sha256(class_lines.encode("utf-8")).hexdigest()
+                    class_node = RegistryNode(
+                        id=f"class:{rel_path}:{item.name}",
+                        name=item.name,
+                        type=NodeType.CLASS,
+                        location=NodeLocation(
+                            path=rel_path,
+                            start_line=item.lineno,
+                            end_line=item.end_lineno,
+                            signature=f"class {item.name}",
+                        ),
+                        hash=class_hash,
+                        metadata={"docstring": ast.get_docstring(item)},
+                    )
+                    nodes.append(class_node)
+
+                    # Extract methods within class
+                    for sub in item.body:
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            fn_lines = "\n".join(lines[sub.lineno - 1 : sub.end_lineno])
+                            fn_hash = hashlib.sha256(fn_lines.encode("utf-8")).hexdigest()
+                            args = [arg.arg for arg in sub.args.args]
+                            sig = f"def {sub.name}({', '.join(args)})"
+                            method_node = RegistryNode(
+                                id=f"func:{rel_path}:{item.name}.{sub.name}",
+                                name=f"{item.name}.{sub.name}",
+                                type=NodeType.FUNCTION,
+                                location=NodeLocation(
+                                    path=rel_path,
+                                    start_line=sub.lineno,
+                                    end_line=sub.end_lineno,
+                                    signature=sig,
+                                ),
+                                hash=fn_hash,
+                                metadata={
+                                    "parent_class": item.name,
+                                    "is_async": isinstance(sub, ast.AsyncFunctionDef),
+                                    "docstring": ast.get_docstring(sub),
+                                },
+                            )
+                            nodes.append(method_node)
+
+                elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    fn_lines = "\n".join(lines[item.lineno - 1 : item.end_lineno])
+                    fn_hash = hashlib.sha256(fn_lines.encode("utf-8")).hexdigest()
+                    args = [arg.arg for arg in item.args.args]
+                    sig = f"def {item.name}({', '.join(args)})"
+                    fn_node = RegistryNode(
+                        id=f"func:{rel_path}:{item.name}",
+                        name=item.name,
+                        type=NodeType.FUNCTION,
+                        location=NodeLocation(
+                            path=rel_path,
+                            start_line=item.lineno,
+                            end_line=item.end_lineno,
+                            signature=sig,
+                        ),
+                        hash=fn_hash,
+                        metadata={
+                            "is_async": isinstance(item, ast.AsyncFunctionDef),
+                            "docstring": ast.get_docstring(item),
+                        },
+                    )
+                    nodes.append(fn_node)
+        except Exception:
+            # Fall back to file node if syntax error in user file
+            pass
+
+    return nodes

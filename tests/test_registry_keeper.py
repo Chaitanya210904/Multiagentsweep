@@ -1,10 +1,12 @@
 """
 Comprehensive tests for the Registry Keeper Agent (Layer: Graph).
+Uses isolated in-memory stores and real filesystem/git integration tests.
 """
 
 import json
 from pathlib import Path
 import pytest
+import subprocess
 import tempfile
 
 from core.exceptions import UnauthorizedAccessError
@@ -23,6 +25,12 @@ from storage.registry_store import CodeRegistryStore
 from agents.graph.registry_keeper import REGISTRY_KEEPER_METADATA, RegistryKeeper
 
 
+@pytest.fixture
+def store():
+    """Provides an isolated in-memory CodeRegistryStore."""
+    return CodeRegistryStore(persistence_path=":memory:")
+
+
 def test_agent_metadata():
     """Verify Registry Keeper agent specification strictly matches system spec."""
     assert REGISTRY_KEEPER_METADATA.id == "registry_keeper"
@@ -38,9 +46,8 @@ def test_agent_metadata():
     assert "unresolved_items_list" in REGISTRY_KEEPER_METADATA.outputs
 
 
-def test_registry_write_access_control():
+def test_registry_write_access_control(store):
     """Verify only agents with 'registry-write' permission can write to the store."""
-    store = CodeRegistryStore()
     node = RegistryNode(
         id="file:src/app.py",
         name="app.py",
@@ -64,9 +71,8 @@ def test_registry_write_access_control():
     assert log_entry.action == ChangeAction.CREATE
 
 
-def test_structure_mapper_proposals_flow():
+def test_structure_mapper_proposals_flow(store):
     """Verify processing of node proposals from Structure Mapper."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     file_node = RegistryNode(
@@ -116,9 +122,8 @@ def test_structure_mapper_proposals_flow():
     assert output.change_log[0].action == ChangeAction.CREATE
 
 
-def test_hash_update_and_idempotency():
+def test_hash_update_and_idempotency(store):
     """Verify hash updates increment versions, and identical writes are idempotent."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     initial_func = RegistryNode(
@@ -169,9 +174,8 @@ def test_hash_update_and_idempotency():
     assert out3.change_log[0].new_hash == "hash_v2_new_implementation"
 
 
-def test_git_diff_file_deletion():
+def test_git_diff_file_deletion(store):
     """Verify file deletion via git diff purges file and all internal child nodes."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     # Prepopulate file, class, function
@@ -216,9 +220,8 @@ def test_git_diff_file_deletion():
     assert all(entry.action == ChangeAction.DELETE for entry in out_diff.change_log)
 
 
-def test_git_diff_file_rename():
+def test_git_diff_file_rename(store):
     """Verify file rename updates file path and ID remapping."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     file_node = RegistryNode(
@@ -264,12 +267,11 @@ def test_git_diff_file_rename():
     assert store.get("file:src/util.py") is None
 
 
-def test_relationship_linker_endpoint_verification():
+def test_relationship_linker_endpoint_verification(store):
     """
     Verify Relationship Linker edges:
     Endpoints are looked up; if missing, placed in unresolved queue instead of being guessed.
     """
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     # Only register caller node
@@ -343,9 +345,8 @@ def test_relationship_linker_endpoint_verification():
     assert edges[0]["target_id"] == "func:src/service.py:execute_command"
 
 
-def test_data_service_mapper_proposals():
+def test_data_service_mapper_proposals(store):
     """Verify registration of APIs, DB tables, and services from Data & Service Mapper."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     api_node = RegistryNode(
@@ -391,9 +392,8 @@ def test_data_service_mapper_proposals():
     assert store.get("service:order-processor") is not None
 
 
-def test_lookup_queries():
+def test_lookup_queries(store):
     """Verify lookup resolution by ID and filters."""
-    store = CodeRegistryStore()
     keeper = RegistryKeeper(store=store)
 
     node = RegistryNode(
@@ -454,3 +454,83 @@ def test_store_disk_persistence(tmp_path):
     assert reloaded_node is not None
     assert reloaded_node.name == "main.py"
     assert len(store2.get_change_log()) == 1
+
+
+def test_real_repository_ast_scanning(tmp_path):
+    """
+    Creates real Python files on disk, scans the folder using RegistryKeeper,
+    and validates real AST extraction of files, classes, and methods with accurate line numbers and hashes.
+    """
+    # Create a real mini project structure
+    service_file = tmp_path / "payment.py"
+    service_file.write_text(
+        '"""Payment processing module."""\n'
+        '\n'
+        'class PaymentGateway:\n'
+        '    """Handles payment transactions."""\n'
+        '    def authorize(self, card_number: str, amount: float) -> bool:\n'
+        '        return True\n'
+        '\n'
+        '    def refund(self, txn_id: str) -> bool:\n'
+        '        return True\n'
+        '\n'
+        'def compute_fee(amount: float) -> float:\n'
+        '    return amount * 0.029\n'
+    )
+
+    store = CodeRegistryStore(persistence_path=":memory:")
+    keeper = RegistryKeeper(store=store, repo_root=str(tmp_path))
+
+    output = keeper.scan_repository(repo_path=str(tmp_path))
+
+    assert output.stats["total_active_nodes"] >= 4
+    file_node = store.get("file:payment.py")
+    assert file_node is not None
+    assert file_node.type == NodeType.FILE
+
+    class_node = store.get("class:payment.py:PaymentGateway")
+    assert class_node is not None
+    assert class_node.location.start_line == 3
+    assert class_node.location.end_line == 9
+
+    auth_method = store.get("func:payment.py:PaymentGateway.authorize")
+    assert auth_method is not None
+    assert "def authorize" in auth_method.location.signature
+
+    func_node = store.get("func:payment.py:compute_fee")
+    assert func_node is not None
+    assert func_node.location.start_line == 11
+    assert func_node.hash != ""
+
+
+def test_real_git_sync(tmp_path):
+    """
+    Initializes a real git repo, commits a file, modifies it, and tests real sync_with_git.
+    """
+    # Initialize a temporary git repository
+    subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test Agent"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "config", "user.email", "test@agent.internal"], cwd=str(tmp_path), check=True)
+
+    test_file = tmp_path / "service.py"
+    test_file.write_text("def ping(): return 'pong'\n")
+
+    subprocess.run(["git", "add", "service.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-m", "initial commit"], cwd=str(tmp_path), check=True)
+
+    store = CodeRegistryStore(persistence_path=":memory:")
+    keeper = RegistryKeeper(store=store, repo_root=str(tmp_path))
+
+    # Initial scan
+    keeper.scan_repository(repo_path=str(tmp_path))
+    assert store.get("func:service.py:ping") is not None
+
+    # Now modify the file
+    test_file.write_text("def ping(): return 'pong v2'\n")
+
+    # Run real sync_with_git
+    output = keeper.sync_with_git()
+    assert len(output.updated_registry) > 0
+
+    updated_fn = store.get("func:service.py:ping")
+    assert updated_fn.version == 2

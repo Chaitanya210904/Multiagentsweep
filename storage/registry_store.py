@@ -34,10 +34,19 @@ class CodeRegistryStore:
     """
 
     ALLOWED_WRITE_PERMISSION = "registry-write"
+    DEFAULT_STORAGE_PATH = os.environ.get("REGISTRY_STORAGE_PATH", ".registry/registry.json")
 
     def __init__(self, persistence_path: Optional[str] = None):
         self._lock = threading.RLock()
-        self._persistence_path = Path(persistence_path) if persistence_path else None
+        
+        # If persistence_path is explicitly ":memory:", do not persist to disk.
+        # If None, use the default persistent storage path.
+        if persistence_path == ":memory:":
+            self._persistence_path = None
+        elif persistence_path is not None:
+            self._persistence_path = Path(persistence_path)
+        else:
+            self._persistence_path = Path(self.DEFAULT_STORAGE_PATH)
         
         # Primary lookup by unique canonical ID
         self._nodes_by_id: Dict[str, RegistryNode] = {}
@@ -52,6 +61,10 @@ class CodeRegistryStore:
 
         if self._persistence_path and self._persistence_path.exists():
             self.load()
+
+    @property
+    def persistence_path(self) -> Optional[Path]:
+        return self._persistence_path
 
     def _verify_write_access(self, access_token: str, agent_id: str = "unknown") -> None:
         """Enforces that only authorized agents with 'registry-write' can mutate the registry."""
@@ -418,19 +431,21 @@ class CodeRegistryStore:
             self.save()
 
     def save(self, filepath: Optional[str] = None) -> None:
-        """Save entire registry state to disk as JSON."""
+        """Save entire registry state to disk as JSON atomically."""
         target = Path(filepath) if filepath else self._persistence_path
         if not target:
             return
         
         target.parent.mkdir(parents=True, exist_ok=True)
+        temp_target = target.with_suffix(f".tmp.{os.getpid()}")
         with self._lock:
             data = {
                 "nodes": {nid: node.model_dump() for nid, node in self._nodes_by_id.items()},
                 "change_log": [entry.model_dump() for entry in self._change_log],
             }
-            with open(target, "w", encoding="utf-8") as f:
+            with open(temp_target, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            os.replace(temp_target, target)
 
     def load(self, filepath: Optional[str] = None) -> None:
         """Load registry state from disk."""

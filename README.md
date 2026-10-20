@@ -61,7 +61,9 @@ multiagent/
 │   ├── base.py                   # BaseAgent & AgentMetadata protocol
 │   └── graph/
 │       ├── __init__.py
-│       └── registry_keeper.py    # Registry Keeper Agent
+│       ├── registry_keeper.py    # Registry Keeper Agent
+│       ├── cli.py                # Production CLI interface
+│       └── __main__.py           # CLI entrypoint (python -m agents.graph)
 ├── core/
 │   ├── __init__.py
 │   └── exceptions.py             # UnauthorizedAccessError, RegistryError, etc.
@@ -70,29 +72,51 @@ multiagent/
 │   └── registry.py               # Pydantic schemas: RegistryNode, NodeLocation, etc.
 ├── storage/
 │   ├── __init__.py
-│   └── registry_store.py         # Thread-safe single source of truth store
+│   └── registry_store.py         # Thread-safe persistent single source of truth store
 ├── tools/
 │   ├── __init__.py
 │   ├── registry_read.py          # registry.read tool
-│   ├── registry_write.py         # registry.write tool (checks registry-write access)
-│   └── git_diff.py               # git.diff parser tool
+│   ├── registry_write.py         # registry.write tool (enforces registry-write access)
+│   └── git_diff.py               # git.diff tool (real git diffs, working tree & commits)
 ├── tests/
 │   ├── __init__.py
-│   └── test_registry_keeper.py   # Complete test suite (10 test cases)
-├── examples/
-│   └── demo_registry_keeper.py   # End-to-end interactive demonstration
-├── requirements.txt
-└── pyproject.toml
+│   └── test_registry_keeper.py   # Complete test suite (12 unit & integration tests)
+└── requirements.txt
 ```
 
 ---
 
-## Running Tests & Demonstration
+## Production CLI Usage
+
+The Registry Keeper can be executed directly from the terminal against any real repository:
 
 ```bash
-# Run tests
-PYTHONPATH=. .venv/bin/pytest tests/test_registry_keeper.py -v
+# 1. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
+python -m agents.graph.cli scan --repo .
 
-# Run the live demonstration
-PYTHONPATH=. .venv/bin/python3 examples/demo_registry_keeper.py
+# 2. View registry status & entity breakdown
+python -m agents.graph.cli status
+
+# 3. List tracked entities filtered by type
+python -m agents.graph.cli list --type function
+
+# 4. Lookup a specific canonical entity by ID
+python -m agents.graph.cli get "func:agents/graph/registry_keeper.py:RegistryKeeper.execute"
+
+# 5. Reconcile against git diff on commit or working tree
+python -m agents.graph.cli sync
+
+# 6. View historical audit change logs
+python -m agents.graph.cli log --limit 10
+
+# 7. Apply proposals from a JSON file
+python -m agents.graph.cli apply /path/to/proposals.json
+```
+
+---
+
+## Running Test Suite
+
+```bash
+PYTHONPATH=. .venv/bin/pytest tests/test_registry_keeper.py -v
 ```
