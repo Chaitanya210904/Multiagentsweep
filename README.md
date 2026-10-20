@@ -52,6 +52,37 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 
 ---
 
+## Agent Specification: Structure Mapper (`structure_mapper`)
+
+| Field | Value |
+|---|---|
+| **ID** | `structure_mapper` |
+| **Name** | Structure Mapper |
+| **Layer** | `graph` |
+| **Role** | Graph agent 1: nodes |
+| **Description** | Walks one shard at a time and creates a node for every file, class and function. Registers each node before it is used anywhere. |
+| **Access** | `read-only` (cannot write directly to registry; proposes updates) |
+| **Model Tier** | `small` |
+| **Trigger** | After Registry Keeper; per changed shard |
+| **Optional** | `false` |
+
+### Inputs
+- `repo_shard`: Target shard directory or list of files (e.g. `shard:agents/graph`).
+- `language_configs`: Language parsing settings and extension mappings.
+- `registry`: Read access to existing registry for checking existing nodes and diffing hashes.
+
+### Outputs
+- `nodes(id,type,path,signature,hash,summary)`: Extracted code nodes with signatures and SCIP symbols.
+- `registry_update_proposals`: Formatted `CREATE` and `UPDATE` proposals for the Registry Keeper.
+
+### Tools
+- `tree_sitter`: Multi-language AST parser extracting files, classes, methods, and functions.
+- `scip`: Source Code Intelligence Protocol symbol generator.
+- `registry.lookup`: Read-only lookup to check existing nodes in the registry.
+- `registry.propose`: Tool packaging nodes into formal `UpdateProposal` objects for Registry Keeper.
+
+---
+
 ## Project Structure
 
 ```
