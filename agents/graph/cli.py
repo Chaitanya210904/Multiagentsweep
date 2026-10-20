@@ -11,7 +11,9 @@ import sys
 from typing import Optional
 
 from agents.graph.registry_keeper import RegistryKeeper
+from agents.graph.structure_mapper import StructureMapper
 from models.registry import NodeType
+from models.structure import RepoShard, StructureMapperInput
 from storage.registry_store import CodeRegistryStore
 
 
@@ -65,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     # apply
     apply_parser = subparsers.add_parser("apply", parents=[common_parser], help="Apply proposals from a JSON file")
     apply_parser.add_argument("file", help="Path to proposals JSON file")
+
+    # map-shard (Structure Mapper)
+    shard_parser = subparsers.add_parser("map-shard", parents=[common_parser], help="Structure Mapper walks a shard and proposes nodes")
+    shard_parser.add_argument("shard_path", help="Path to shard folder or file")
+    shard_parser.add_argument("--register", action="store_true", help="Immediately register proposals with Registry Keeper")
+    shard_parser.add_argument("--only-changed", action="store_true", help="Only propose modified or new nodes")
 
     return parser
 
@@ -143,6 +151,32 @@ def main():
         print(f"✅ Proposals applied!")
         print(f"   • Updated nodes: {len(output.updated_registry)}")
         print(f"   • Unresolved items: {len(output.unresolved_items_list)}")
+
+    elif args.command == "map-shard":
+        mapper = StructureMapper(store=store, repo_root=args.repo)
+        shard = RepoShard.from_directory(args.shard_path, repo_root=args.repo)
+        print(f"🗺️  Structure Mapper walking shard: {shard.shard_id} ({shard.root_path})...")
+
+        if args.register:
+            mapper_out, keeper_out = mapper.map_and_register(
+                registry_keeper=keeper,
+                repo_shard=shard,
+                only_changed=args.only_changed,
+            )
+            print(f"✅ Mapped and registered with Registry Keeper!")
+            print(f"   • Nodes extracted: {len(mapper_out.nodes)}")
+            print(f"   • Proposals applied: {len(mapper_out.registry_update_proposals)}")
+            print(f"   • Registry nodes updated: {len(keeper_out.updated_registry)}")
+        else:
+            inputs = StructureMapperInput(repo_shard=shard, only_changed=args.only_changed)
+            output = mapper.execute(inputs)
+            print(f"✅ Shard mapped successfully!")
+            print(f"   • Nodes extracted: {len(output.nodes)}")
+            print(f"   • Proposals generated: {len(output.registry_update_proposals)}")
+            for p in output.registry_update_proposals[:10]:
+                print(f"     [{p.action.value.upper()}] {p.node.id if p.node else p.proposal_id}")
+            if len(output.registry_update_proposals) > 10:
+                print(f"     ... and {len(output.registry_update_proposals) - 10} more")
 
 
 if __name__ == "__main__":

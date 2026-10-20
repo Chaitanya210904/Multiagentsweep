@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union
 
 from agents.base import AgentMetadata, BaseAgent
 from core.exceptions import UnauthorizedAccessError
@@ -101,7 +101,7 @@ class RegistryKeeper(BaseAgent):
         )
         self.git_tool = GitDiffTool(repo_root=repo_root)
 
-    def execute(self, inputs: RegistryKeeperInput) -> RegistryKeeperOutput:
+    def execute(self, inputs: Union[RegistryKeeperInput, Dict[str, Any]]) -> RegistryKeeperOutput:
         """
         Executes the Registry Keeper reconciliation cycle:
         1. Process git diffs and deleted/renamed files
@@ -112,6 +112,9 @@ class RegistryKeeper(BaseAgent):
         6. Return updated registry slice, unresolved items, and change log
         """
         self.require_access("registry-write")
+
+        if isinstance(inputs, dict):
+            inputs = RegistryKeeperInput.model_validate(inputs)
 
         updated_nodes: Dict[str, RegistryNode] = {}
         unresolved_items: List[UnresolvedItem] = []

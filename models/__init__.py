@@ -12,6 +12,13 @@ from .registry import (
     RegistryKeeperInput,
     RegistryKeeperOutput,
 )
+from .structure import (
+    RepoShard,
+    LanguageConfig,
+    DEFAULT_LANGUAGE_CONFIGS,
+    StructureMapperInput,
+    StructureMapperOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -26,4 +33,9 @@ __all__ = [
     "LookupQuery",
     "RegistryKeeperInput",
     "RegistryKeeperOutput",
+    "RepoShard",
+    "LanguageConfig",
+    "DEFAULT_LANGUAGE_CONFIGS",
+    "StructureMapperInput",
+    "StructureMapperOutput",
 ]
