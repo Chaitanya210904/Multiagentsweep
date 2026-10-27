@@ -23,7 +23,38 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `tech_scout` (**Tech Scout: Technology researcher**) - *Implemented*
    - DB Heartbeat
 7. **Action Layer**: Implementer
-8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+8. **Optional Layer**:
+   - `test_generation` (**Test Generation: Test writer**) - *Implemented*
+   - Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Test Generation (`test_generation`)
+
+| Field | Value |
+|---|---|
+| **ID** | `test_generation` |
+| **Name** | Test Generation |
+| **Layer** | `optional` |
+| **Role** | Test writer |
+| **Description** | Writes tests for coverage gaps. |
+| **Access** | `can-edit` (persists new test suites and executes test runner) |
+| **Model Tier** | `medium` |
+| **Trigger** | `after approval` (in-memory draft mode without approval; persists and executes upon approval) |
+| **Optional** | `true` |
+
+### Inputs
+- `coverage_gaps`: Test coverage gap findings (from `code_quality`, `coverage_parser`, or `impact_analyzer`).
+- `code_under_test`: Target source files, modules, or AST code entities.
+- `approved`: Explicit operator approval flag enforcing trigger gate.
+- `dry_run`: In-memory synthesis and syntax verification flag.
+
+### Outputs
+- `new_test_files`: List of synthesized `NewTestFile` specifications with test cases, AST imports, and `test_runner` verification results.
+
+### Tools
+- `test_runner`: Automated test runner executing pytest subprocesses, capturing pass/fail metrics, duration, stdout, and tracebacks.
+- `registry.lookup`: Queries canonical code nodes in the Code Registry to resolve functions, methods, parameters, and signatures.
 
 ---
 

@@ -35,6 +35,11 @@ from .runtime import (
     TechScoutAgent,
     TechScout,
 )
+from .optional import (
+    TEST_GENERATION_METADATA,
+    TestGenerationAgent,
+    TestGeneration,
+)
 
 __all__ = [
     "AgentMetadata",
@@ -65,4 +70,8 @@ __all__ = [
     "TECH_SCOUT_METADATA",
     "TechScoutAgent",
     "TechScout",
+    "TEST_GENERATION_METADATA",
+    "TestGenerationAgent",
+    "TestGeneration",
 ]
+

@@ -97,6 +97,15 @@ from .tech_scout import (
     TechScoutInput,
     TechScoutOutput,
 )
+from .test_generation import (
+    TestType,
+    CoverageGap,
+    CodeUnderTest,
+    TestCase,
+    NewTestFile,
+    TestGenerationInput,
+    TestGenerationOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -176,6 +185,13 @@ __all__ = [
     "StackMetadata",
     "TechScoutInput",
     "TechScoutOutput",
+    "TestType",
+    "CoverageGap",
+    "CodeUnderTest",
+    "TestCase",
+    "NewTestFile",
+    "TestGenerationInput",
+    "TestGenerationOutput",
 ]
 
 

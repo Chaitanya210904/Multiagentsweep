@@ -22,6 +22,7 @@ from agents.safety.security_agent import SecurityAgent
 from agents.runtime.observability_agent import ObservabilityAgent
 from agents.runtime.scale_load_agent import ScaleLoadAgent
 from agents.runtime.tech_scout_agent import TechScoutAgent
+from agents.optional.test_generation_agent import TestGenerationAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
@@ -30,6 +31,7 @@ from models.impact import ImpactAnalyzerInput
 from models.observability import ObservabilityInput
 from models.scale_load import ScaleLoadInput, TrafficTarget
 from models.tech_scout import TechScoutInput
+from models.test_generation import TestGenerationInput
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.security import SecurityInput, VulnerabilitySeverity
@@ -154,6 +156,14 @@ def build_parser() -> argparse.ArgumentParser:
     ts_parser.add_argument("--pain-points", nargs="*", default=None, help="Specific pain points or bottlenecks to address")
     ts_parser.add_argument("--focus", nargs="*", default=None, help="Focus areas (e.g. database, caching, framework)")
     ts_parser.add_argument("--max-options", type=int, default=5, help="Maximum number of options to rank (default: 5)")
+
+    # generate-tests (Test Generation)
+    tg_parser = subparsers.add_parser("generate-tests", parents=[common_parser], help="Test Generation Agent writes regression and unit tests for coverage gaps (after approval)")
+    tg_parser.add_argument("--code", nargs="*", default=None, help="Target source code files or modules to cover")
+    tg_parser.add_argument("--gaps", nargs="*", default=None, help="Coverage gaps, line ranges, or node IDs lacking tests")
+    tg_parser.add_argument("--approve", action="store_true", help="Explicit operator approval to persist and execute tests on disk")
+    tg_parser.add_argument("--dry-run", action="store_true", help="Synthesize and verify tests in-memory without disk write")
+    tg_parser.add_argument("--output-dir", default=None, help="Target directory for generated test files (default: tests/generated/)")
 
 
 
@@ -632,6 +642,45 @@ def main():
                     print(f"        - Phase {phase.phase_number} ({phase.title}): {phase.description}")
                 print(f"      • Rollback: {opt.migration_outline.rollback_strategy}")
 
+    elif args.command == "generate-tests":
+        test_agent = TestGenerationAgent(
+            registry_store=store,
+            repo_root=args.repo,
+        )
+        code_targets = args.code or []
+        gap_targets = args.gaps or []
+
+        inp = TestGenerationInput(
+            code_under_test=code_targets,
+            coverage_gaps=gap_targets,
+            approved=args.approve,
+            dry_run=args.dry_run,
+            output_dir=args.output_dir,
+        )
+        res = test_agent.execute(inp)
+
+        status_icon = "🟢 APPROVED" if res.approval_status == "approved" else "🟡 AWAITING APPROVAL"
+        print(f"\n🧪 Test Generation Report: [{status_icon}]")
+        print(f"   • Approval Status: {res.approval_status}")
+        print(f"   • Total Test Cases Synthesized: {res.total_tests_generated}")
+        print(f"   • Total Coverage Gaps Addressed: {res.total_gaps_addressed}")
+        print(f"   • Test Files Produced: {len(res.new_test_files)}")
+
+        if not args.approve:
+            print("\n⚠️  NOTICE: Run with '--approve' to write test files to disk and execute automated verification.")
+
+        for f in res.new_test_files:
+            persist_tag = "💾 WRITTEN" if f.written_to_disk else "📝 IN-MEMORY DRAFT"
+            ver_tag = f"[{f.verification_status.upper()}]"
+            print(f"\n   • {persist_tag} {ver_tag} {f.test_file_path}")
+            print(f"     Target Source: {f.source_file_path}")
+            print(f"     Test Cases: {len(f.test_cases)}")
+            for tc in f.test_cases:
+                print(f"       - [{tc.test_type.value.upper()}] {tc.name} ({tc.description})")
+            if f.test_runner_result:
+                tr = f.test_runner_result
+                print(f"     ⏱️  Runner: {tr.get('passed', 0)} passed, {tr.get('failed', 0)} failed ({tr.get('duration_ms', 0):.1f}ms)")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
@@ -662,8 +711,9 @@ def main():
         target_obs = ObservabilityAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scale = ScaleLoadAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scout = TechScoutAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_testgen = TestGenerationAgent(registry_store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/12] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/13] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
@@ -709,14 +759,24 @@ def main():
             traffic_target=TrafficTarget(target_rps=100.0, target_p99_latency_ms=200.0),
         ))
 
-        print(f"\n🔬 [11/12] Tech Scout researching modern upgrades for identified bottlenecks...")
+        print(f"\n🔬 [11/13] Tech Scout researching modern upgrades for identified bottlenecks...")
         scout_pains = [b.title for b in scale_out.bottlenecks] or ["Throughput scaling and query latency"]
         scout_out = target_scout.execute(TechScoutInput(
             pain_points_from_other_agents=scout_pains,
             max_options=3,
         ))
 
-        print(f"\n📊 [12/12] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
+        print(f"\n🧪 [12/13] Test Generation synthesizing unit tests for coverage gaps (approval gate & dry-run)...")
+        testgen_targets = sample_files[:2] if sample_files else []
+        testgen_gaps = impact_out.untested_nodes[:3] if impact_out.untested_nodes else []
+        testgen_out = target_testgen.execute(TestGenerationInput(
+            code_under_test=testgen_targets,
+            coverage_gaps=testgen_gaps,
+            approved=True,
+            dry_run=True,
+        ))
+
+        print(f"\n📊 [13/13] Pipeline Complete Across Graph, Understanding, Quality, Safety, Runtime & Optional Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -731,9 +791,10 @@ def main():
         print(f"   • Runtime Health Status: [{obs_out.health_status}]")
         print(f"   • Capacity Status: [{scale_out.capacity_estimate.status.value}] ({scale_out.capacity_estimate.current_max_rps:.1f} max RPS vs {scale_out.capacity_estimate.target_rps:.1f} target)")
         print(f"   • Top Tech Recommendation: {scout_out.top_recommendation or 'None'}")
+        print(f"   • Generated Test Cases: {testgen_out.total_tests_generated} ({len(testgen_out.new_test_files)} file(s), Status: [{testgen_out.approval_status}])")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 11 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 12 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout, Test Generation) successfully processed real GitHub repository {url}!")
 
 
 
