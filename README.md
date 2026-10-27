@@ -9,12 +9,54 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `structure_mapper` (**Structure Mapper: nodes**) - *Implemented*
    - `relationship_linker` (**Relationship Linker: code edges**) - *Implemented*
    - `data_service_mapper` (**Data & Service Mapper: system edges**) - *Implemented*
-3. **Understanding Layer**: Impact Analyzer
+3. **Understanding Layer**:
+   - `impact_analyzer` (**Impact Analyzer: Blast-radius finder**) - *Implemented*
 4. **Quality Layer**: Architecture Review, Code Quality
 5. **Safety Layer**: Security, Company Rules, Compatibility, Validation
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Impact Analyzer (`impact_analyzer`)
+
+| Field | Value |
+|---|---|
+| **ID** | `impact_analyzer` |
+| **Name** | Impact Analyzer |
+| **Layer** | `understanding` |
+| **Role** | Blast-radius finder |
+| **Description** | Walks the graph from changed nodes to find callers, callees and tests, then wakes only the affected agents. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | After graph is refreshed on a change |
+| **Optional** | `false` |
+
+### Inputs
+- `changed_nodes`: List of node IDs or `RegistryNode` objects that were added, modified, or deleted.
+- `graph`: Bidirectional dependency graph (accessed via `graph.traverse`).
+- `registry`: The existing Code Registry (accessed via `registry.lookup`).
+
+### Outputs
+- `blast_radius_score`: Calibrated quantitative risk score from `0.0` (minimal) to `100.0` (catastrophic).
+- `affected_nodes_and_services`: Categorized callers, callees, affected APIs, database tables, external services, and targeted tests.
+- `agents_to_wake`: Selective wake directives targeting only downstream agents relevant to the change.
+
+### Tools
+- `graph.traverse`: Breadth-first bidirectional graph traversal (`upstream`, `downstream`, `both`) with cycle detection and path reconstruction.
+- `registry.lookup`: Read-only entity lookup to inspect node metadata and edge attributes.
+
+### Selective Agent Waking Matrix
+| Agent | Layer | Trigger Condition |
+|---|---|---|
+| `orchestrator` | Control | Always woken to supervise downstream execution. |
+| `code_quality` | Quality | Woken if code nodes (functions, classes, files) are affected. |
+| `test_runner` | Quality | Woken if existing tests directly cover affected code (`tests_to_run`). |
+| `test_generation` | Optional | Woken if modified code nodes lack test coverage (`untested_nodes`). |
+| `security_agent` | Safety | Woken if APIs, external services are affected, or severity is `CRITICAL`. |
+| `compatibility_agent` | Safety | Woken if public APIs or DB table schemas are affected. |
+| `architecture_review` | Quality | Woken if blast radius score is `HIGH`/`CRITICAL` or service boundaries are crossed. |
 
 ---
 

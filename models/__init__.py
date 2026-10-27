@@ -33,6 +33,15 @@ from .data_service import (
     DataServiceMapperInput,
     DataServiceMapperOutput,
 )
+from .impact import (
+    ImpactSeverity,
+    TraversalStep,
+    PropagationPath,
+    AffectedEntities,
+    WakeDirective,
+    ImpactAnalyzerInput,
+    ImpactAnalyzerOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -62,6 +71,14 @@ __all__ = [
     "UnresolvedSystemLink",
     "DataServiceMapperInput",
     "DataServiceMapperOutput",
+    "ImpactSeverity",
+    "TraversalStep",
+    "PropagationPath",
+    "AffectedEntities",
+    "WakeDirective",
+    "ImpactAnalyzerInput",
+    "ImpactAnalyzerOutput",
 ]
+
 
 

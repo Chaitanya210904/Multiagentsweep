@@ -15,12 +15,15 @@ from agents.graph.registry_keeper import RegistryKeeper
 from agents.graph.structure_mapper import StructureMapper
 from agents.graph.relationship_linker import RelationshipLinker
 from agents.graph.data_service_mapper import DataServiceMapper
+from agents.understanding.impact_analyzer import ImpactAnalyzer
 from core.logger import AgentLogger, agent_logger
 from models.data_service import DataServiceMapperInput, SystemEdgeType
+from models.impact import ImpactAnalyzerInput
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.structure import RepoShard, StructureMapperInput
 from storage.registry_store import CodeRegistryStore
+
 
 
 
@@ -91,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
     sys_parser = subparsers.add_parser("map-system", parents=[common_parser], help="Data & Service Mapper maps APIs, DB tables/queries, and external services")
     sys_parser.add_argument("--shard", default=None, help="Scope system mapping to a specific directory shard")
     sys_parser.add_argument("--register", action="store_true", help="Immediately register system nodes and edges with Registry Keeper")
+
+    # analyze-impact (Impact Analyzer)
+    impact_parser = subparsers.add_parser("analyze-impact", parents=[common_parser], help="Impact Analyzer calculates blast-radius and determines agents to wake")
+    impact_parser.add_argument("nodes", nargs="+", help="Canonical node IDs that changed (e.g. 'func:bottle.py:Router.add')")
+    impact_parser.add_argument("--max-depth", type=int, default=6, help="Maximum dependency traversal depth (default: 6)")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -277,6 +285,52 @@ def main():
             for u in dsm_out.unresolved_queue[:5]:
                 print(f"   • [{u.edge_type.value}] {u.source_path}: '{u.raw_target}' -> {u.reason}")
 
+    elif args.command == "analyze-impact":
+        analyzer = ImpactAnalyzer(store=store, repo_root=args.repo)
+        inp = ImpactAnalyzerInput(changed_nodes=args.nodes, max_depth=args.max_depth)
+        res = analyzer.execute(inp)
+
+        severity_colors = {
+            "low": "🟢 LOW",
+            "medium": "🟡 MEDIUM",
+            "high": "🟠 HIGH",
+            "critical": "🔴 CRITICAL",
+        }
+        sev_label = severity_colors.get(res.severity.value, res.severity.value.upper())
+
+        print(f"\n💥 Blast Radius Analysis Report:")
+        print(f"   • Score: {res.blast_radius_score}/100.0 [{sev_label}]")
+        print(f"   • Changed Roots: {', '.join(res.affected_nodes_and_services.changed_roots)}")
+        print(f"   • Total Affected Entities: {len(res.affected_nodes_and_services.all_affected_node_ids)}")
+        print(f"   • Max Propagation Depth: {res.affected_nodes_and_services.max_propagation_depth}")
+
+        aff = res.affected_nodes_and_services
+        print(f"\n👥 Upstream Callers Impacted ({len(aff.callers)}):")
+        for c in aff.callers[:5]:
+            print(f"   • {c}")
+        if len(aff.callers) > 5:
+            print(f"   ... and {len(aff.callers) - 5} more.")
+
+        print(f"\n🔻 Downstream Callees Impacted ({len(aff.callees)}):")
+        for c in aff.callees[:5]:
+            print(f"   • {c}")
+        if len(aff.callees) > 5:
+            print(f"   ... and {len(aff.callees) - 5} more.")
+
+        print(f"\n🌐 System & Contract Impact:")
+        print(f"   • Affected APIs: {len(aff.affected_apis)} -> {', '.join(aff.affected_apis[:3]) or 'None'}")
+        print(f"   • Affected DB Tables: {len(aff.affected_tables)} -> {', '.join(aff.affected_tables[:3]) or 'None'}")
+        print(f"   • Affected Services: {len(aff.affected_services)} -> {', '.join(aff.affected_services[:3]) or 'None'}")
+
+        print(f"\n🧪 Test Coverage Breakdown:")
+        print(f"   • Targeted Tests to Run: {len(aff.tests_to_run)} -> {', '.join(aff.tests_to_run[:3]) or 'None'}")
+        print(f"   • Untested Modified Nodes (Risk): {len(aff.untested_nodes)} entities")
+
+        print(f"\n⚡ Selective Agents to Wake ({len(res.agents_to_wake)}):")
+        for w in res.agents_to_wake:
+            print(f"   • [{w.priority.upper():<6}] [{w.layer.upper():<13}] Agent: '{w.agent_id}'")
+            print(f"     Reason: {w.reason}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
@@ -300,6 +354,7 @@ def main():
         target_mapper = StructureMapper(store=target_store, repo_root=str(dest_dir))
         target_linker = RelationshipLinker(store=target_store, repo_root=str(dest_dir))
         target_dsm = DataServiceMapper(store=target_store, repo_root=str(dest_dir))
+        target_impact = ImpactAnalyzer(store=target_store, repo_root=str(dest_dir))
 
         print(f"\n🗺️  [2/6] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
@@ -319,35 +374,23 @@ def main():
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n📊 [5/6] Registration Complete for All 4 Graph Agents:")
+        print(f"\n💥 [5/6] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
+        impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
+
+        print(f"\n📊 [6/6] Pipeline Complete Across Graph & Understanding Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
-        print(f"   • System nodes extracted: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
+        print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
         print(f"   • Code edges verified: {len(linker_out.verified_edges)}")
-        print(f"   • System edges verified: {total_system_edges} (API->Code: {len(dsm_out.api_to_code_edges)}, Code->Table: {len(dsm_out.code_to_table_edges)}, Service->Service: {len(dsm_out.service_to_service_edges)})")
-        print(f"   • Total active registry nodes: {keeper_sys_out.stats.get('total_active_nodes')}")
-        print(f"   • Audit change log records: {len(keeper_sys_out.change_log)}")
+        print(f"   • System edges verified: {total_system_edges}")
+        print(f"   • Simulated Changed Node: {sample_node}")
+        print(f"   • Blast Radius Score: {impact_out.blast_radius_score}/100.0 ({impact_out.severity.value.upper()})")
+        print(f"   • Selective Agents Woken: {[w.agent_id for w in impact_out.agents_to_wake]}")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🔍 [6/6] Sample of discovered system entities & edges in {repo_name}:")
-        if dsm_out.api_nodes:
-            print("   • Discovered APIs:")
-            for a in dsm_out.api_nodes[:3]:
-                print(f"     - [{a.location.endpoint_method}] {a.location.endpoint_route}")
-        if dsm_out.table_nodes:
-            print("   • Discovered DB Tables:")
-            for t in dsm_out.table_nodes[:3]:
-                print(f"     - {t.name}")
-        if dsm_out.service_nodes:
-            print("   • Discovered External Services:")
-            for s in dsm_out.service_nodes[:3]:
-                print(f"     - {s.name}")
-        if total_system_edges > 0:
-            print("   • Sample Verified System Edges:")
-            for edge in (dsm_out.api_to_code_edges + dsm_out.code_to_table_edges + dsm_out.service_to_service_edges)[:5]:
-                print(f"     - [{edge.type.value}] {edge.source_id}  -->  {edge.target_id}")
+        print(f"\n🎉 SUCCESS: All 5 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer) successfully processed real GitHub repository {url}!")
 
-        print(f"\n🎉 SUCCESS: All 4 Graph agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper) successfully processed real GitHub repository {url}!")
 
 
 
