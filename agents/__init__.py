@@ -16,6 +16,8 @@ from .understanding import (
 from .quality import (
     ARCHITECTURE_REVIEW_METADATA,
     ArchitectureReview,
+    CODE_QUALITY_METADATA,
+    CodeQuality,
 )
 
 __all__ = [
@@ -33,4 +35,6 @@ __all__ = [
     "ImpactAnalyzer",
     "ARCHITECTURE_REVIEW_METADATA",
     "ArchitectureReview",
+    "CODE_QUALITY_METADATA",
+    "CodeQuality",
 ]

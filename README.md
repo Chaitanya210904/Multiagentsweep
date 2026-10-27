@@ -13,11 +13,44 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `impact_analyzer` (**Impact Analyzer: Blast-radius finder**) - *Implemented*
 4. **Quality Layer**:
    - `architecture_review` (**Architecture Review: Structure checker**) - *Implemented*
-   - `code_quality` (**Code Quality**)
+   - `code_quality` (**Code Quality: Maintainability checker**) - *Implemented*
 5. **Safety Layer**: Security, Company Rules, Compatibility, Validation
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Code Quality (`code_quality`)
+
+| Field | Value |
+|---|---|
+| **ID** | `code_quality` |
+| **Name** | Code Quality |
+| **Layer** | `quality` |
+| **Role** | Maintainability checker |
+| **Description** | Finds complexity, duplication, smells, test coverage gaps and style issues. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | On changed files |
+| **Optional** | `false` |
+
+### Inputs
+- `changed_files`: List of files that changed or need maintainability review.
+- `graph_neighbors`: Related neighbor nodes (callers, callees, tests) from Impact Analyzer.
+- `coverage_reports`: Test coverage reports (coverage.py JSON, LCOV, Cobertura XML, or coverage dicts).
+
+### Outputs
+- `findings_with_file_and_line`: Detailed findings pinpointed to exact file paths and line numbers with remediations.
+- `maintainability_rating`: SonarQube SQALE rating (`A`, `B`, `C`, `D`, `E`).
+- `technical_debt_minutes`: Total estimated remediation time in minutes.
+- `coverage_summary`: Coverage percentage across changed files and list of uncovered lines.
+
+### Tools
+- `sonarqube`: SonarQube quality engine inspecting cognitive complexity, code smells (long functions, too many parameters, broad exceptions, deep nesting) and cross-file block duplication.
+- `ruff`: Official Ruff linter integration (and AST fallback) for unused imports, dead variables, and formatting.
+- `eslint`: ESLint linter integration (and JS/TS rule fallback) for `no-var`, `no-eval`, `eqeqeq`, and debugger calls.
+- `registry.lookup`: Code registry lookup tool to resolve neighbor nodes and locations.
 
 ---
 

@@ -17,8 +17,10 @@ from agents.graph.relationship_linker import RelationshipLinker
 from agents.graph.data_service_mapper import DataServiceMapper
 from agents.understanding.impact_analyzer import ImpactAnalyzer
 from agents.quality.architecture_review import ArchitectureReview
+from agents.quality.code_quality import CodeQuality
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
+from models.code_quality import CodeQualityInput
 from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.registry import NodeType
@@ -108,6 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
     arch_parser.add_argument("--threshold", type=int, default=15, help="Efferent coupling threshold for hotspots (default: 15)")
     arch_parser.add_argument("--no-cycles", action="store_true", help="Disable circular dependency checking")
     arch_parser.add_argument("--adrs", default=None, help="Path to existing ADRs directory or file")
+
+    # check-quality (Code Quality)
+    qual_parser = subparsers.add_parser("check-quality", parents=[common_parser], help="Code Quality finds complexity, duplication, smells, coverage gaps, and style issues")
+    qual_parser.add_argument("files", nargs="*", default=None, help="Files to inspect (defaults to changed git files or active nodes)")
+    qual_parser.add_argument("--coverage", default=None, help="Path to coverage report (JSON, XML, LCOV)")
+    qual_parser.add_argument("--max-complexity", type=int, default=10, help="Maximum cyclomatic complexity threshold (default: 10)")
+    qual_parser.add_argument("--max-lines", type=int, default=50, help="Maximum function lines threshold (default: 50)")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -379,12 +388,47 @@ def main():
                 print(f"   • [{adr.id}] {adr.title} ({adr.status.value.upper()})")
                 print(f"     Decision: {adr.decision}")
 
+    elif args.command == "check-quality":
+        cq = CodeQuality(store=store, repo_root=args.repo)
+        target_files = args.files
+        if not target_files:
+            target_files = [n.location.path for n in store.list_all() if n.type == NodeType.FILE][:20]
+
+        cov_reports = [args.coverage] if args.coverage else []
+        inp = CodeQualityInput(
+            changed_files=target_files,
+            coverage_reports=cov_reports,
+            max_cyclomatic_complexity=args.max_complexity,
+            max_function_lines=args.max_lines,
+        )
+        res = cq.execute(inp)
+
+        print(f"\n🔍 Code Quality Inspection Report:")
+        print(f"   • Maintainability Rating: [{res.maintainability_rating}] (SonarQube SQALE)")
+        print(f"   • Total Technical Debt: {res.technical_debt_minutes} minutes ({round(res.technical_debt_minutes / 60, 1)} hrs)")
+        print(f"   • Files Analyzed: {res.stats.get('files_analyzed')}")
+        print(f"   • Total Findings: {len(res.findings_with_file_and_line)}")
+
+        if res.coverage_summary:
+            print(f"\n🧪 Test Coverage:")
+            print(f"   • Changed Files Coverage: {res.coverage_summary.changed_files_coverage_pct}%")
+            print(f"   • Overall Coverage: {res.coverage_summary.overall_coverage_pct}%")
+
+        if res.findings_with_file_and_line:
+            print(f"\n⚠️  Quality Findings with File & Line:")
+            for f in res.findings_with_file_and_line[:10]:
+                print(f"   • [{f.severity.value.upper():<8}] [{f.category.value:<12}] {f.file_path}:{f.line_number} ({f.rule_id})")
+                print(f"     {f.message}")
+                print(f"     💡 Remediation: {f.remediation}")
+            if len(res.findings_with_file_and_line) > 10:
+                print(f"   ... and {len(res.findings_with_file_and_line) - 10} more findings.")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/7] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/8] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -404,33 +448,38 @@ def main():
         target_dsm = DataServiceMapper(store=target_store, repo_root=str(dest_dir))
         target_impact = ImpactAnalyzer(store=target_store, repo_root=str(dest_dir))
         target_arch = ArchitectureReview(store=target_store, repo_root=str(dest_dir))
+        target_quality = CodeQuality(store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/7] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/8] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/7] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/8] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/7] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/8] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/7] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/8] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/7] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [6/8] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n📊 [7/7] Pipeline Complete Across Graph, Understanding & Quality Layers:")
+        print(f"\n🔍 [7/8] Code Quality inspecting complexity, duplication, smells & style...")
+        sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
+        quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
+
+        print(f"\n📊 [8/8] Pipeline Complete Across Graph, Understanding & Quality Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -438,11 +487,11 @@ def main():
         print(f"   • System edges verified: {total_system_edges}")
         print(f"   • Blast Radius Score: {impact_out.blast_radius_score}/100.0 ({impact_out.severity.value.upper()})")
         print(f"   • Clean Architecture Score: {arch_out.clean_architecture_score}/100.0")
-        print(f"   • Violations Detected: {len(arch_out.violations)}")
-        print(f"   • Draft ADRs Formulated: {len(arch_out.draft_adrs)}")
+        print(f"   • Code Maintainability Rating: [{quality_out.maintainability_rating}] ({quality_out.technical_debt_minutes} min debt)")
+        print(f"   • Quality Findings Pinpointed: {len(quality_out.findings_with_file_and_line)}")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 6 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 7 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality) successfully processed real GitHub repository {url}!")
 
 
 

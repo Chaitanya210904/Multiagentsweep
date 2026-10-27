@@ -7,6 +7,10 @@ from .registry_lookup_tool import RegistryLookupTool
 from .registry_propose_tool import RegistryProposeTool
 from .graph_write_edge_tool import GraphWriteEdgeTool
 from .graph_traverse_tool import GraphTraverseTool
+from .sonarqube_tool import SonarQubeTool
+from .ruff_tool import RuffTool
+from .eslint_tool import ESLintTool
+from .coverage_parser import CoverageParserTool
 
 __all__ = [
     "RegistryReadTool",
@@ -18,5 +22,9 @@ __all__ = [
     "RegistryProposeTool",
     "GraphWriteEdgeTool",
     "GraphTraverseTool",
+    "SonarQubeTool",
+    "RuffTool",
+    "ESLintTool",
+    "CoverageParserTool",
 ]
 

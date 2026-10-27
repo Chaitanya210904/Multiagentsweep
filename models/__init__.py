@@ -52,6 +52,14 @@ from .architecture import (
     ArchitectureReviewInput,
     ArchitectureReviewOutput,
 )
+from .code_quality import (
+    QualityFindingCategory,
+    FindingSeverity,
+    QualityFinding,
+    CoverageSummary,
+    CodeQualityInput,
+    CodeQualityOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -96,6 +104,12 @@ __all__ = [
     "ADRRecord",
     "ArchitectureReviewInput",
     "ArchitectureReviewOutput",
+    "QualityFindingCategory",
+    "FindingSeverity",
+    "QualityFinding",
+    "CoverageSummary",
+    "CodeQualityInput",
+    "CodeQualityOutput",
 ]
 
 
