@@ -75,8 +75,9 @@ class UsageReadTool:
             self._ingest_explicit_telemetry(raw_telemetry, agent_usages, tier_usage)
 
         # 2. Ingest from central JSONL log file if present
-        if self.log_file.exists():
-            self._ingest_from_log_file(agent_usages, tier_usage)
+        log_path = self.log_file if self.log_file.exists() else Path("logs/agents.jsonl")
+        if log_path.exists():
+            self._ingest_from_log_file(agent_usages, tier_usage, file_path=log_path)
 
         # 3. Aggregate totals
         total_prompt = sum(u.prompt_tokens for u in agent_usages.values())
@@ -152,10 +153,12 @@ class UsageReadTool:
         self,
         agent_usages: Dict[str, AgentTokenUsage],
         tier_usage: Dict[str, int],
+        file_path: Optional[Path] = None,
     ) -> None:
         """Scans agents.jsonl log file and extracts token telemetry events."""
+        target = file_path if file_path else self.log_file
         try:
-            with open(self.log_file, "r", encoding="utf-8") as f:
+            with open(target, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
