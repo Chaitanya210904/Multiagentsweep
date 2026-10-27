@@ -16,8 +16,8 @@ class ScipTool:
     name = "scip"
     description = "Generates Source Code Intelligence Protocol (SCIP) symbols and descriptors for code entities."
 
-    def __init__(self, package_name: str = "multiagent", version: str = "0.1.0"):
-        self.package_name = package_name
+    def __init__(self, package_name: Optional[str] = None, version: str = "0.1.0"):
+        self.package_name = package_name or Path.cwd().name
         self.version = version
 
     def generate_symbol(self, node: RegistryNode) -> str:

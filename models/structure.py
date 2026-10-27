@@ -26,13 +26,17 @@ class RepoShard(BaseModel):
     def from_directory(cls, dir_path: Union[str, Path], repo_root: Union[str, Path] = ".") -> "RepoShard":
         """Factory method to construct a RepoShard from a directory."""
         repo_p = Path(repo_root).resolve()
-        dir_p = Path(dir_path).resolve()
+        dp = Path(dir_path)
+        if dp.is_absolute():
+            dir_p = dp.resolve()
+        else:
+            dir_p = (repo_p / dp).resolve()
         try:
             rel = str(dir_p.relative_to(repo_p))
         except ValueError:
             rel = str(dir_p)
         clean_rel = "." if rel == "." else rel.lstrip("./")
-        shard_id = f"shard:{clean_rel.replace('/', '.')}"
+        shard_id = f"shard:{clean_rel.replace('/', '.')}" if clean_rel != "." else f"shard:{repo_p.name}"
         return cls(shard_id=shard_id, root_path=clean_rel)
 
 

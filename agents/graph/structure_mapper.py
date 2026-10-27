@@ -89,7 +89,7 @@ class StructureMapper(BaseAgent):
 
         # Tools
         self.tree_sitter_tool = TreeSitterTool(repo_root=str(self.repo_root))
-        self.scip_tool = ScipTool(package_name="multiagent")
+        self.scip_tool = ScipTool(package_name=self.repo_root.name)
         self.lookup_tool = RegistryLookupTool(store=self.store)
         self.propose_tool = RegistryProposeTool(source_agent=self.id)
 

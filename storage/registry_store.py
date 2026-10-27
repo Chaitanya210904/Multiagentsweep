@@ -58,6 +58,7 @@ class CodeRegistryStore:
         
         # Complete historical audit log
         self._change_log: List[ChangeLogEntry] = []
+        self._auto_save_disabled: bool = False
 
         if self._persistence_path and self._persistence_path.exists():
             self.load()
@@ -426,7 +427,26 @@ class CodeRegistryStore:
         if node.hash:
             self._ids_by_hash[node.hash].discard(node.id)
 
+    def batch_context(self):
+        """Context manager to batch mutations and save to disk once atomically upon exit."""
+        class _BatchContext:
+            def __init__(self, store: "CodeRegistryStore"):
+                self.store = store
+
+            def __enter__(self):
+                self.store._auto_save_disabled = True
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                self.store._auto_save_disabled = False
+                if exc_type is None:
+                    self.store._auto_save()
+
+        return _BatchContext(self)
+
     def _auto_save(self) -> None:
+        if getattr(self, "_auto_save_disabled", False):
+            return
         if self._persistence_path:
             self.save()
 

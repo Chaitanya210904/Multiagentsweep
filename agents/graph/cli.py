@@ -7,6 +7,7 @@ lookup nodes, and inspect audit change logs.
 import argparse
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Optional
 
@@ -82,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     logs_parser.add_argument("--layer", default=None, help="Filter by layer (e.g., 'graph')")
     logs_parser.add_argument("--level", default=None, help="Filter by level (INFO, WARNING, ERROR)")
     logs_parser.add_argument("--raw", action="store_true", help="Print raw JSON format")
+
+    # test-github
+    gh_parser = subparsers.add_parser("test-github", parents=[common_parser], help="Clone and run Structure Mapper + Registry Keeper on a real GitHub repository")
+    gh_parser.add_argument("github_url", help="GitHub repository URL (e.g. 'https://github.com/psf/requests' or any public repo)")
+    gh_parser.add_argument("--dest", default=None, help="Local directory to clone into (default: repos/<repo-name>)")
+    gh_parser.add_argument("--depth", type=int, default=1, help="Git clone depth (default: 1 for fast cloning)")
 
     return parser
 
@@ -203,6 +210,52 @@ def main():
                     print(json.dumps(r.model_dump()))
                 else:
                     agent_logger._write_to_console(r)
+
+    elif args.command == "test-github":
+        url = args.github_url
+        repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
+        dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
+
+        print(f"📦 [1/4] Preparing real GitHub repository: {url}")
+        if not dest_dir.exists():
+            print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
+            dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run(["git", "clone", f"--depth={args.depth}", url, str(dest_dir)], capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"❌ Git clone failed: {res.stderr}")
+                sys.exit(1)
+            print(f"✅ Successfully cloned {repo_name}!")
+        else:
+            print(f"📂 Found existing cloned repo at: {dest_dir}")
+
+        storage_file = dest_dir / ".registry" / "registry.json"
+        target_store = CodeRegistryStore(persistence_path=str(storage_file))
+        target_keeper = RegistryKeeper(store=target_store, repo_root=str(dest_dir))
+        target_mapper = StructureMapper(store=target_store, repo_root=str(dest_dir))
+
+        print(f"\n🗺️  [2/4] Structure Mapper walking real GitHub repository...")
+        mapper_out, keeper_out = target_mapper.map_and_register(
+            registry_keeper=target_keeper,
+            repo_shard=".",
+        )
+
+        print(f"\n📊 [3/4] Registration complete with Registry Keeper:")
+        print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
+        print(f"   • Real code entities extracted: {len(mapper_out.nodes)}")
+        print(f"   • Total active nodes in registry: {keeper_out.stats.get('total_active_nodes')}")
+        print(f"   • Audit change log records: {len(keeper_out.change_log)}")
+        print(f"   • Saved to: {storage_file}")
+
+        print(f"\n🔍 [4/4] Sample of real registered code entities from {repo_name}:")
+        for node in mapper_out.nodes[:8]:
+            scip = node.metadata.get("scip_symbol", "")
+            print(f"   • [{node.type.value:<8}] {node.id}")
+            if scip:
+                print(f"     SCIP: {scip}")
+        if len(mapper_out.nodes) > 8:
+            print(f"   ... and {len(mapper_out.nodes) - 8} more real entities.")
+
+        print(f"\n🎉 SUCCESS: Both agents successfully processed real GitHub repository {url}!")
 
 
 if __name__ == "__main__":

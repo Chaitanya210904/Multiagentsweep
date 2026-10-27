@@ -129,49 +129,50 @@ class RegistryKeeper(BaseAgent):
         change_logs: List[ChangeLogEntry] = []
 
         try:
-            # ----------------------------------------------------------------------
-            # 1. Process Git Diffs & Deleted / Renamed Files
-            # ----------------------------------------------------------------------
-            self._process_git_diffs_and_deletions(
-                git_diffs=inputs.git_diffs,
-                deleted_or_renamed_files=inputs.deleted_or_renamed_files,
-                change_logs=change_logs,
-            )
+            with self.store.batch_context():
+                # ----------------------------------------------------------------------
+                # 1. Process Git Diffs & Deleted / Renamed Files
+                # ----------------------------------------------------------------------
+                self._process_git_diffs_and_deletions(
+                    git_diffs=inputs.git_diffs,
+                    deleted_or_renamed_files=inputs.deleted_or_renamed_files,
+                    change_logs=change_logs,
+                )
 
-            # ----------------------------------------------------------------------
-            # 2. Process Proposals from Structure Mapper (Agent 4: Nodes)
-            # ----------------------------------------------------------------------
-            self._process_structure_mapper_proposals(
-                proposals=inputs.update_proposals_from_structure_mapper,
-                updated_nodes=updated_nodes,
-                unresolved_items=unresolved_items,
-                change_logs=change_logs,
-            )
+                # ----------------------------------------------------------------------
+                # 2. Process Proposals from Structure Mapper (Agent 4: Nodes)
+                # ----------------------------------------------------------------------
+                self._process_structure_mapper_proposals(
+                    proposals=inputs.update_proposals_from_structure_mapper,
+                    updated_nodes=updated_nodes,
+                    unresolved_items=unresolved_items,
+                    change_logs=change_logs,
+                )
 
-            # ----------------------------------------------------------------------
-            # 3. Process Proposals from Relationship Linker (Agent 5: Code Edges)
-            # ----------------------------------------------------------------------
-            self._process_relationship_linker_proposals(
-                proposals=inputs.update_proposals_from_relationship_linker,
-                updated_nodes=updated_nodes,
-                unresolved_items=unresolved_items,
-                change_logs=change_logs,
-            )
+                # ----------------------------------------------------------------------
+                # 3. Process Proposals from Relationship Linker (Agent 5: Code Edges)
+                # ----------------------------------------------------------------------
+                self._process_relationship_linker_proposals(
+                    proposals=inputs.update_proposals_from_relationship_linker,
+                    updated_nodes=updated_nodes,
+                    unresolved_items=unresolved_items,
+                    change_logs=change_logs,
+                )
 
-            # ----------------------------------------------------------------------
-            # 4. Process Proposals from Data & Service Mapper (Agent 6: System Edges)
-            # ----------------------------------------------------------------------
-            self._process_data_service_mapper_proposals(
-                proposals=inputs.update_proposals_from_data_service_mapper,
-                updated_nodes=updated_nodes,
-                unresolved_items=unresolved_items,
-                change_logs=change_logs,
-            )
+                # ----------------------------------------------------------------------
+                # 4. Process Proposals from Data & Service Mapper (Agent 6: System Edges)
+                # ----------------------------------------------------------------------
+                self._process_data_service_mapper_proposals(
+                    proposals=inputs.update_proposals_from_data_service_mapper,
+                    updated_nodes=updated_nodes,
+                    unresolved_items=unresolved_items,
+                    change_logs=change_logs,
+                )
 
-            # ----------------------------------------------------------------------
-            # 5. Answer Lookup Queries
-            # ----------------------------------------------------------------------
-            lookup_answers = self._answer_lookups(inputs.lookups)
+                # ----------------------------------------------------------------------
+                # 5. Answer Lookup Queries
+                # ----------------------------------------------------------------------
+                lookup_answers = self._answer_lookups(inputs.lookups)
 
             # Compile statistics
             stats = {
