@@ -23,6 +23,7 @@ from agents.runtime.observability_agent import ObservabilityAgent
 from agents.runtime.scale_load_agent import ScaleLoadAgent
 from agents.runtime.tech_scout_agent import TechScoutAgent
 from agents.optional.test_generation_agent import TestGenerationAgent
+from agents.optional.cost_token_governor_agent import CostTokenGovernorAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
@@ -32,6 +33,13 @@ from models.observability import ObservabilityInput
 from models.scale_load import ScaleLoadInput, TrafficTarget
 from models.tech_scout import TechScoutInput
 from models.test_generation import TestGenerationInput
+from models.cost_token_governor import (
+    CostTokenGovernorInput,
+    ModelTier,
+    TaskPlan,
+    TaskPlanStep,
+    TaskComplexity,
+)
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.security import SecurityInput, VulnerabilitySeverity
@@ -164,6 +172,12 @@ def build_parser() -> argparse.ArgumentParser:
     tg_parser.add_argument("--approve", action="store_true", help="Explicit operator approval to persist and execute tests on disk")
     tg_parser.add_argument("--dry-run", action="store_true", help="Synthesize and verify tests in-memory without disk write")
     tg_parser.add_argument("--output-dir", default=None, help="Target directory for generated test files (default: tests/generated/)")
+
+    # govern-tokens (Cost & Token Governor)
+    gov_parser = subparsers.add_parser("govern-tokens", parents=[common_parser], help="Cost & Token Governor sets token budgets and routes simple checks to small models")
+    gov_parser.add_argument("--budget", type=float, default=None, help="Budget ceiling in USD (e.g., 5.00)")
+    gov_parser.add_argument("--aggressive", action="store_true", help="Aggressively down-route moderate tasks to small models")
+    gov_parser.add_argument("--plan-file", default=None, help="Optional path to custom JSON task plan file")
 
 
 
@@ -681,6 +695,62 @@ def main():
                 tr = f.test_runner_result
                 print(f"     ⏱️  Runner: {tr.get('passed', 0)} passed, {tr.get('failed', 0)} failed ({tr.get('duration_ms', 0):.1f}ms)")
 
+    elif args.command == "govern-tokens":
+        gov = CostTokenGovernorAgent(log_file=Path(args.repo) / "logs" / "agents.jsonl")
+
+        # Load custom plan or build comprehensive multi-agent plan
+        if args.plan_file and Path(args.plan_file).exists():
+            plan_data = json.loads(Path(args.plan_file).read_text(encoding="utf-8"))
+            plan = TaskPlan(**plan_data)
+        else:
+            plan = TaskPlan(
+                plan_id="plan_standard_platform_audit",
+                title="Full Multi-Agent Codebase Audit",
+                overall_budget_usd=args.budget,
+                steps=[
+                    TaskPlanStep(step_id="step_1_structure", agent_id="structure_mapper", task_type="ast_scan", complexity=TaskComplexity.SIMPLE, estimated_input_tokens=2500, requested_tier=ModelTier.SMALL),
+                    TaskPlanStep(step_id="step_2_linker", agent_id="relationship_linker", task_type="code_edges", complexity=TaskComplexity.SIMPLE, estimated_input_tokens=3000, requested_tier=ModelTier.SMALL),
+                    TaskPlanStep(step_id="step_3_data_service", agent_id="data_service_mapper", task_type="api_db_edges", complexity=TaskComplexity.MODERATE, estimated_input_tokens=4000, requested_tier=ModelTier.SMALL),
+                    TaskPlanStep(step_id="step_4_impact", agent_id="impact_analyzer", task_type="blast_radius", complexity=TaskComplexity.MODERATE, estimated_input_tokens=3500, requested_tier=ModelTier.SMALL),
+                    TaskPlanStep(step_id="step_5_code_quality", agent_id="code_quality", task_type="lint_check", complexity=TaskComplexity.SIMPLE, estimated_input_tokens=2000, requested_tier=ModelTier.SMALL),
+                    TaskPlanStep(step_id="step_6_architecture", agent_id="architecture_review", task_type="architecture_review", complexity=TaskComplexity.COMPLEX, estimated_input_tokens=10000, requested_tier=ModelTier.MEDIUM),
+                    TaskPlanStep(step_id="step_7_security", agent_id="security", task_type="sast_scan", complexity=TaskComplexity.MODERATE, estimated_input_tokens=8000, requested_tier=ModelTier.MEDIUM),
+                    TaskPlanStep(step_id="step_8_observability", agent_id="observability", task_type="trace_analysis", complexity=TaskComplexity.MODERATE, estimated_input_tokens=5000, requested_tier=ModelTier.MEDIUM),
+                    TaskPlanStep(step_id="step_9_scale_load", agent_id="scale_load", task_type="capacity_analysis", complexity=TaskComplexity.COMPLEX, estimated_input_tokens=7000, requested_tier=ModelTier.MEDIUM),
+                    TaskPlanStep(step_id="step_10_tech_scout", agent_id="tech_scout", task_type="tech_research", complexity=TaskComplexity.COMPLEX, estimated_input_tokens=9000, requested_tier=ModelTier.MEDIUM),
+                    TaskPlanStep(step_id="step_11_test_gen", agent_id="test_generation", task_type="test_writing", complexity=TaskComplexity.COMPLEX, estimated_input_tokens=8000, requested_tier=ModelTier.MEDIUM),
+                ]
+            )
+
+        inp = CostTokenGovernorInput(
+            task_plan=plan,
+            budget_limit_usd=args.budget,
+            aggressive_savings=args.aggressive,
+        )
+        res = gov.execute(inp)
+        rep = res.cost_report
+
+        status_icon = "🔴 EXCEEDED" if rep.is_budget_exceeded else "🟢 WITHIN BUDGET"
+        print(f"\n💰 Cost & Token Governor Budget Report: [{status_icon}]")
+        print(f"   • Total Tokens Consumed So Far: {rep.total_tokens_consumed:,} tokens")
+        print(f"   • Total Current Spend: ${rep.total_cost_usd:.4f} USD")
+        if rep.budget_limit_usd:
+            print(f"   • Budget Limit Ceiling: ${rep.budget_limit_usd:.4f} USD (Consumed: {rep.budget_consumed_pct}%)")
+        print(f"   • Down-Routed Steps: {res.total_down_routed_steps}/{res.total_plan_steps} steps (Saved: ${rep.total_estimated_savings_usd:.4f} USD)")
+        print(f"   • Projected Execution Plan Cost: ${res.projected_plan_cost_usd:.4f} USD")
+
+        print(f"\n🚦 Model Tier Routing Decisions:")
+        for rd in res.routing_decisions:
+            tag = "⬇️ DOWN-ROUTED" if rd.down_routed else "➡️ STANDARD"
+            save_str = f" (Saved: ${rd.estimated_savings_usd:.4f})" if rd.down_routed else ""
+            print(f"   • [{tag}] {rd.step_id} ({rd.agent_id}): [{rd.selected_model_tier.value.upper()}] model='{rd.selected_model_name}'{save_str}")
+            print(f"     Caps: max_in={rd.max_input_tokens:,}, max_out={rd.max_output_tokens:,} | Rationale: {rd.routing_rationale}")
+
+        if rep.optimization_recommendations:
+            print(f"\n💡 Cost Optimization Recommendations:")
+            for rec in rep.optimization_recommendations:
+                print(f"   • {rec}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
@@ -712,8 +782,20 @@ def main():
         target_scale = ScaleLoadAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scout = TechScoutAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_testgen = TestGenerationAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_gov = CostTokenGovernorAgent(log_file=dest_dir / "logs" / "agents.jsonl")
 
-        print(f"\n🗺️  [2/13] Structure Mapper walking real GitHub repository...")
+        print(f"\n💰 [2/14] Cost & Token Governor budgeting workflow and routing simple checks to small models...")
+        gov_out = target_gov.execute(CostTokenGovernorInput(
+            task_plan=[
+                {"step_id": "step_map", "agent_id": "structure_mapper", "task_type": "ast_scan", "complexity": "simple", "estimated_input_tokens": 2000},
+                {"step_id": "step_link", "agent_id": "relationship_linker", "task_type": "code_edges", "complexity": "simple", "estimated_input_tokens": 2500},
+                {"step_id": "step_arch", "agent_id": "architecture_review", "task_type": "architecture_review", "complexity": "complex", "estimated_input_tokens": 8000},
+            ],
+            budget_limit_usd=10.0,
+            aggressive_savings=True,
+        ))
+
+        print(f"\n🗺️  [3/14] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
@@ -792,9 +874,10 @@ def main():
         print(f"   • Capacity Status: [{scale_out.capacity_estimate.status.value}] ({scale_out.capacity_estimate.current_max_rps:.1f} max RPS vs {scale_out.capacity_estimate.target_rps:.1f} target)")
         print(f"   • Top Tech Recommendation: {scout_out.top_recommendation or 'None'}")
         print(f"   • Generated Test Cases: {testgen_out.total_tests_generated} ({len(testgen_out.new_test_files)} file(s), Status: [{testgen_out.approval_status}])")
+        print(f"   • Token Governor Down-Routed: {gov_out.total_down_routed_steps} steps (Saved: ${gov_out.cost_report.total_estimated_savings_usd:.4f} USD)")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 12 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout, Test Generation) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 13 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout, Test Generation, Cost & Token Governor) successfully processed real GitHub repository {url}!")
 
 
 

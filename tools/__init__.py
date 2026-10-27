@@ -22,6 +22,8 @@ from .locust_tool import LocustTool
 from .web_search_tool import WebSearchTool, SearchResult
 from .docs_fetch_tool import DocsFetchTool, DocResult
 from .test_runner_tool import TestRunnerTool, TestExecutionResult
+from .usage_read_tool import UsageReadTool
+from .router_set_tool import RouterSetTool
 
 __all__ = [
     "RegistryReadTool",
@@ -53,5 +55,7 @@ __all__ = [
     "DocResult",
     "TestRunnerTool",
     "TestExecutionResult",
+    "UsageReadTool",
+    "RouterSetTool",
 ]
 

@@ -25,7 +25,38 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 7. **Action Layer**: Implementer
 8. **Optional Layer**:
    - `test_generation` (**Test Generation: Test writer**) - *Implemented*
-   - Cost & Token Governor, Documentation, Rollback/Release
+   - `cost_token_governor` (**Cost & Token Governor: Budget controller**) - *Implemented*
+   - Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Cost & Token Governor (`cost_token_governor`)
+
+| Field | Value |
+|---|---|
+| **ID** | `cost_token_governor` |
+| **Name** | Cost & Token Governor |
+| **Layer** | `optional` |
+| **Role** | Budget controller |
+| **Description** | Sets token budgets and routes simple checks to small models. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | `on every task` |
+| **Optional** | `true` |
+
+### Inputs
+- `task_plan`: Execution plan consisting of steps, complexity tiers, estimated token requirements, and requested model tiers.
+- `token_usage`: Live or historical token consumption summaries from past executions across all agents.
+- `budget_limit_usd`: Optional financial cap (USD) enforced on pipeline task runs.
+- `aggressive_savings`: Flag to aggressively route moderate checks to small models and clamp token bounds.
+
+### Outputs
+- `routing_decisions`: Per-step routing directives allocating optimal model tiers (`small`, `medium`, `large`), specific model endpoints (`gemini-2.5-flash`, `gemini-2.5-pro`), hard token bounds (`max_input_tokens`, `max_output_tokens`), and calculated dollar savings.
+- `cost_report`: Financial accounting report covering total consumed tokens, current spend (USD), budget limit status, budget exhaustion percentage, down-routing statistics, projected plan cost, and strategic cost optimization suggestions.
+
+### Tools
+- `usage.read`: Reads and parses live agent logs (`agents.jsonl`) and computes pricing metrics based on standardized model tier rate cards (Small: $0.075 / $0.30 per 1M; Medium: $1.00 / $4.00 per 1M; Large: $5.00 / $15.00 per 1M).
+- `router.set`: Allocates model tiers, clamps input/output token bounds, and dynamically down-routes simple checks (AST scans, code edges, lints, single-file diffs) to small models to reduce platform token burn.
 
 ---
 
@@ -383,6 +414,9 @@ python -m agents.graph.cli test-github https://github.com/bottlepy/bottle
 
 # 5. View live structured execution logs
 python -m agents.graph.cli logs --limit 20
+
+# 6. Audit token expenditure and route tasks to small models
+python -m agents.graph.cli govern-tokens --budget 10.0 --aggressive
 ```
 
 ---
