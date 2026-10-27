@@ -42,6 +42,16 @@ from .impact import (
     ImpactAnalyzerInput,
     ImpactAnalyzerOutput,
 )
+from .architecture import (
+    ArchitectureViolationType,
+    ViolationSeverity,
+    ArchitecturalViolation,
+    CouplingMetric,
+    ADRStatus,
+    ADRRecord,
+    ArchitectureReviewInput,
+    ArchitectureReviewOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -78,6 +88,14 @@ __all__ = [
     "WakeDirective",
     "ImpactAnalyzerInput",
     "ImpactAnalyzerOutput",
+    "ArchitectureViolationType",
+    "ViolationSeverity",
+    "ArchitecturalViolation",
+    "CouplingMetric",
+    "ADRStatus",
+    "ADRRecord",
+    "ArchitectureReviewInput",
+    "ArchitectureReviewOutput",
 ]
 
 

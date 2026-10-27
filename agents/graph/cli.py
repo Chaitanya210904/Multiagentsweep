@@ -16,7 +16,9 @@ from agents.graph.structure_mapper import StructureMapper
 from agents.graph.relationship_linker import RelationshipLinker
 from agents.graph.data_service_mapper import DataServiceMapper
 from agents.understanding.impact_analyzer import ImpactAnalyzer
+from agents.quality.architecture_review import ArchitectureReview
 from core.logger import AgentLogger, agent_logger
+from models.architecture import ArchitectureReviewInput
 from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.registry import NodeType
@@ -99,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     impact_parser = subparsers.add_parser("analyze-impact", parents=[common_parser], help="Impact Analyzer calculates blast-radius and determines agents to wake")
     impact_parser.add_argument("nodes", nargs="+", help="Canonical node IDs that changed (e.g. 'func:bottle.py:Router.add')")
     impact_parser.add_argument("--max-depth", type=int, default=6, help="Maximum dependency traversal depth (default: 6)")
+
+    # review-architecture (Architecture Review)
+    arch_parser = subparsers.add_parser("review-architecture", parents=[common_parser], help="Architecture Review checks layers, boundaries, cycles, coupling, and records ADRs")
+    arch_parser.add_argument("--nodes", nargs="*", default=None, help="Scope review to specific node IDs (defaults to all)")
+    arch_parser.add_argument("--threshold", type=int, default=15, help="Efferent coupling threshold for hotspots (default: 15)")
+    arch_parser.add_argument("--no-cycles", action="store_true", help="Disable circular dependency checking")
+    arch_parser.add_argument("--adrs", default=None, help="Path to existing ADRs directory or file")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -331,12 +340,51 @@ def main():
             print(f"   • [{w.priority.upper():<6}] [{w.layer.upper():<13}] Agent: '{w.agent_id}'")
             print(f"     Reason: {w.reason}")
 
+    elif args.command == "review-architecture":
+        reviewer = ArchitectureReview(store=store, repo_root=args.repo)
+        existing_adrs = [args.adrs] if args.adrs else []
+        inp = ArchitectureReviewInput(
+            graph_slice=args.nodes,
+            existing_adrs=existing_adrs,
+            max_coupling_threshold=args.threshold,
+            check_cycles=not args.no_cycles,
+        )
+        res = reviewer.execute(inp)
+
+        print(f"\n🏛️  Architecture Review Report:")
+        print(f"   • Clean Architecture Score: {res.clean_architecture_score}/100.0")
+        print(f"   • Nodes Reviewed: {res.summary.get('nodes_reviewed')}")
+        print(f"   • Total Violations: {len(res.violations)}")
+        print(f"   • Layer Inversions: {res.summary.get('layer_inversions')}")
+        print(f"   • Circular Dependencies: {res.summary.get('circular_dependencies')}")
+        print(f"   • Excessive Coupling Hotspots: {res.summary.get('coupling_hotspots')}")
+
+        if res.violations:
+            print(f"\n⚠️  Architectural Violations ({len(res.violations)}):")
+            for v in res.violations[:8]:
+                print(f"   • [{v.severity.value.upper():<8}] [{v.type.value}] {v.message}")
+                print(f"     💡 Remediation: {v.remediation}")
+            if len(res.violations) > 8:
+                print(f"   ... and {len(res.violations) - 8} more violations.")
+
+        hotspots = [m for m in res.coupling_metrics if m.is_hotspot]
+        if hotspots:
+            print(f"\n🔥 Excessive Coupling Hotspots (Limit > {args.threshold}):")
+            for h in hotspots[:5]:
+                print(f"   • {h.entity_id} -> Ce={h.efferent_coupling}, Ca={h.afferent_coupling}, Instability={h.instability}")
+
+        if res.draft_adrs:
+            print(f"\n📜 Formulated Draft Architecture Decision Records ({len(res.draft_adrs)}):")
+            for adr in res.draft_adrs:
+                print(f"   • [{adr.id}] {adr.title} ({adr.status.value.upper()})")
+                print(f"     Decision: {adr.decision}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/6] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/7] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -355,41 +403,46 @@ def main():
         target_linker = RelationshipLinker(store=target_store, repo_root=str(dest_dir))
         target_dsm = DataServiceMapper(store=target_store, repo_root=str(dest_dir))
         target_impact = ImpactAnalyzer(store=target_store, repo_root=str(dest_dir))
+        target_arch = ArchitectureReview(store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/6] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/7] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/6] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/7] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/6] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/7] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/6] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/7] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n📊 [6/6] Pipeline Complete Across Graph & Understanding Layers:")
+        print(f"\n🏛️  [6/7] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
+
+        print(f"\n📊 [7/7] Pipeline Complete Across Graph, Understanding & Quality Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
         print(f"   • Code edges verified: {len(linker_out.verified_edges)}")
         print(f"   • System edges verified: {total_system_edges}")
-        print(f"   • Simulated Changed Node: {sample_node}")
         print(f"   • Blast Radius Score: {impact_out.blast_radius_score}/100.0 ({impact_out.severity.value.upper()})")
-        print(f"   • Selective Agents Woken: {[w.agent_id for w in impact_out.agents_to_wake]}")
+        print(f"   • Clean Architecture Score: {arch_out.clean_architecture_score}/100.0")
+        print(f"   • Violations Detected: {len(arch_out.violations)}")
+        print(f"   • Draft ADRs Formulated: {len(arch_out.draft_adrs)}")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 5 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 6 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review) successfully processed real GitHub repository {url}!")
 
 
 

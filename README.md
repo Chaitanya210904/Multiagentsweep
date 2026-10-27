@@ -11,11 +11,42 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `data_service_mapper` (**Data & Service Mapper: system edges**) - *Implemented*
 3. **Understanding Layer**:
    - `impact_analyzer` (**Impact Analyzer: Blast-radius finder**) - *Implemented*
-4. **Quality Layer**: Architecture Review, Code Quality
+4. **Quality Layer**:
+   - `architecture_review` (**Architecture Review: Structure checker**) - *Implemented*
+   - `code_quality` (**Code Quality**)
 5. **Safety Layer**: Security, Company Rules, Compatibility, Validation
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Architecture Review (`architecture_review`)
+
+| Field | Value |
+|---|---|
+| **ID** | `architecture_review` |
+| **Name** | Architecture Review |
+| **Layer** | `quality` |
+| **Role** | Structure checker |
+| **Description** | Checks layers, boundaries, circular dependencies and coupling, and records ADRs. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `medium` |
+| **Trigger** | When impact analysis flags structural change |
+| **Optional** | `false` |
+
+### Inputs
+- `graph_slice`: List of node IDs or `RegistryNode` objects in scope (defaults to all active nodes if omitted).
+- `existing_adrs`: List of existing Architecture Decision Records (directory path or ADR models).
+
+### Outputs
+- `violations`: Detected breaches (`layer_inversion`, `circular_dependency`, `service_boundary_leak`, `excessive_coupling`, `forbidden_dependency`).
+- `coupling_metrics`: Robert C. Martin's Package Coupling Metrics ($C_a$, $C_e$, Instability $I = \frac{C_e}{C_a + C_e}$).
+- `draft_adrs`: Auto-generated Michael Nygard-compliant draft Architecture Decision Records.
+
+### Tools
+- `graph.traverse`: Graph traversal engine for dependency cycle detection and boundary checks.
+- `registry.lookup`: Lookup node definitions, locations, and metadata.
 
 ---
 
