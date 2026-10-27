@@ -26,6 +26,13 @@ from .relationship import (
     RelationshipLinkerInput,
     RelationshipLinkerOutput,
 )
+from .data_service import (
+    SystemEdgeType,
+    SystemEdge,
+    UnresolvedSystemLink,
+    DataServiceMapperInput,
+    DataServiceMapperOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -50,5 +57,11 @@ __all__ = [
     "UnresolvedLink",
     "RelationshipLinkerInput",
     "RelationshipLinkerOutput",
+    "SystemEdgeType",
+    "SystemEdge",
+    "UnresolvedSystemLink",
+    "DataServiceMapperInput",
+    "DataServiceMapperOutput",
 ]
+
 

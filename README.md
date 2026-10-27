@@ -8,13 +8,51 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `registry_keeper` (**Registry Keeper (the list)**) - *Implemented*
    - `structure_mapper` (**Structure Mapper: nodes**) - *Implemented*
    - `relationship_linker` (**Relationship Linker: code edges**) - *Implemented*
-   - `data_service_mapper` (Data & Service Mapper: system edges)
+   - `data_service_mapper` (**Data & Service Mapper: system edges**) - *Implemented*
 3. **Understanding Layer**: Impact Analyzer
 4. **Quality Layer**: Architecture Review, Code Quality
 5. **Safety Layer**: Security, Company Rules, Compatibility, Validation
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Data & Service Mapper (`data_service_mapper`)
+
+| Field | Value |
+|---|---|
+| **ID** | `data_service_mapper` |
+| **Name** | Data & Service Mapper |
+| **Layer** | `graph` |
+| **Role** | Graph agent 3: system edges |
+| **Description** | Maps APIs, DB tables and queries, queues, configs, env vars, external services and cross-service calls. Checks the registry before linking. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | After Structure Mapper; parallel with Relationship Linker |
+| **Optional** | `false` |
+
+### Inputs
+- `api_specs`: API specifications, decorators, OpenAPI/Swagger definitions.
+- `migrations`: SQL migration scripts (`CREATE TABLE`), Prisma schemas, ORM models.
+- `query_code`: Source files containing SQL queries (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) or ORM operations.
+- `config_files`: `.env`, `docker-compose.yml`, `settings.py`, YAML/JSON configurations.
+- `registry`: The existing Code Registry (accessible via `registry.lookup`).
+
+### Outputs
+- `api_to_code_edges`: Verified edges linking API endpoints to code handlers.
+- `code_to_table_edges`: Verified edges linking query functions/methods to database tables.
+- `service_to_service_edges`: Verified edges linking code to external services and queues.
+- `unresolved_queue`: Missing endpoints (never guessed).
+- `registry_update_proposals`: Update proposals for system nodes (`api`, `table`, `service`) and system edges.
+
+### Tools
+- `registry.lookup`: Lookup nodes and tables/services to verify endpoints.
+- `registry.propose`: Package system nodes and edges into structured `UpdateProposal` objects.
+- `graph.write_edge`: Create, validate, and record graph edges between verified endpoints.
+
+---
+
 
 ---
 

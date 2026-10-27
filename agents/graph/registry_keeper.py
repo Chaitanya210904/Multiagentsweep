@@ -420,6 +420,68 @@ class RegistryKeeper(BaseAgent):
         Checks registry before linking and registers verified system nodes.
         """
         for proposal in proposals:
+            details = proposal.details or {}
+            source_id = details.get("source_id")
+            target_id = details.get("target_id")
+
+            # Handle System Edge Proposal (linking two system/code nodes)
+            if not proposal.node and source_id and target_id:
+                source_node = self.read_tool.get(source_id) or updated_nodes.get(source_id)
+                target_node = self.read_tool.get(target_id) or updated_nodes.get(target_id)
+
+                if not source_node:
+                    unresolved_items.append(
+                        UnresolvedItem(
+                            item_id=f"edge:{source_id}->{target_id}",
+                            reason=f"Source endpoint '{source_id}' does not exist in registry. Edge rejected to unresolved queue.",
+                            source_agent="data_service_mapper",
+                            proposal=proposal.model_dump(),
+                            suggested_action=f"Register source node '{source_id}' first",
+                        )
+                    )
+                    continue
+
+                if not target_node:
+                    unresolved_items.append(
+                        UnresolvedItem(
+                            item_id=f"edge:{source_id}->{target_id}",
+                            reason=f"Target endpoint '{target_id}' does not exist in registry. Edge rejected to unresolved queue.",
+                            source_agent="data_service_mapper",
+                            proposal=proposal.model_dump(),
+                            suggested_action=f"Register target node '{target_id}' first",
+                        )
+                    )
+                    continue
+
+                edge_type = details.get("edge_type", "system_edge")
+                line_num = details.get("line_number")
+                op = details.get("operation")
+
+                edges = source_node.metadata.setdefault("outgoing_edges", [])
+                edge_repr = {"target_id": target_id, "type": edge_type, "operation": op, "line_number": line_num}
+                if edge_repr not in edges:
+                    edges.append(edge_repr)
+                    written_node, log_entry = self.write_tool.write_node(
+                        node=source_node,
+                        details={"source": "data_service_mapper", "edge_added": edge_repr},
+                    )
+                    updated_nodes[written_node.id] = written_node
+                    if log_entry:
+                        change_logs.append(log_entry)
+
+                in_edges = target_node.metadata.setdefault("incoming_edges", [])
+                in_repr = {"source_id": source_id, "type": edge_type, "operation": op, "line_number": line_num}
+                if in_repr not in in_edges:
+                    in_edges.append(in_repr)
+                    written_target, t_log = self.write_tool.write_node(
+                        node=target_node,
+                        details={"source": "data_service_mapper", "incoming_edge_added": in_repr},
+                    )
+                    updated_nodes[written_target.id] = written_target
+                    if t_log:
+                        change_logs.append(t_log)
+                continue
+
             node = proposal.node
             if not node:
                 unresolved_items.append(
