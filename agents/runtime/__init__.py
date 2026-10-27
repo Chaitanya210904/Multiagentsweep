@@ -12,8 +12,13 @@ from .scale_load_agent import (
     SCALE_LOAD_METADATA,
     ScaleLoadAgent,
 )
+from .tech_scout_agent import (
+    TECH_SCOUT_METADATA,
+    TechScoutAgent,
+)
 
 ScaleLoad = ScaleLoadAgent
+TechScout = TechScoutAgent
 
 __all__ = [
     "OBSERVABILITY_METADATA",
@@ -22,4 +27,7 @@ __all__ = [
     "SCALE_LOAD_METADATA",
     "ScaleLoadAgent",
     "ScaleLoad",
+    "TECH_SCOUT_METADATA",
+    "TechScoutAgent",
+    "TechScout",
 ]

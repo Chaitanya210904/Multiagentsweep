@@ -31,6 +31,9 @@ from .runtime import (
     SCALE_LOAD_METADATA,
     ScaleLoadAgent,
     ScaleLoad,
+    TECH_SCOUT_METADATA,
+    TechScoutAgent,
+    TechScout,
 )
 
 __all__ = [
@@ -59,4 +62,7 @@ __all__ = [
     "SCALE_LOAD_METADATA",
     "ScaleLoadAgent",
     "ScaleLoad",
+    "TECH_SCOUT_METADATA",
+    "TechScoutAgent",
+    "TechScout",
 ]

@@ -19,6 +19,8 @@ from .logs_search_tool import LogsSearchTool, LogIncident
 from .traces_search_tool import TracesSearchTool, TraceIncident
 from .k6_tool import K6Tool
 from .locust_tool import LocustTool
+from .web_search_tool import WebSearchTool, SearchResult
+from .docs_fetch_tool import DocsFetchTool, DocResult
 
 __all__ = [
     "RegistryReadTool",
@@ -44,5 +46,9 @@ __all__ = [
     "TraceIncident",
     "K6Tool",
     "LocustTool",
+    "WebSearchTool",
+    "SearchResult",
+    "DocsFetchTool",
+    "DocResult",
 ]
 

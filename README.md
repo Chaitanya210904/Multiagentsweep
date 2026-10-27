@@ -20,9 +20,43 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 6. **Runtime Layer**:
    - `observability` (**Observability: Logs, metrics and traces reader**) - *Implemented*
    - `scale_load` (**Scale & Load: Capacity analyst**) - *Implemented*
-   - DB Heartbeat, Tech Scout
+   - `tech_scout` (**Tech Scout: Technology researcher**) - *Implemented*
+   - DB Heartbeat
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Tech Scout (`tech_scout`)
+
+| Field | Value |
+|---|---|
+| **ID** | `tech_scout` |
+| **Name** | Tech Scout |
+| **Layer** | `runtime` |
+| **Role** | Technology researcher |
+| **Description** | Researches better technology and ranks it by benefit, effort and risk. Reports only. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `medium` |
+| **Trigger** | on request or scheduled |
+| **Optional** | `false` |
+
+### Inputs
+- `stack_metadata`: Current technology stack metadata (languages, frameworks, DBs, dependencies).
+- `pain_points_from_other_agents`: Collected pain points, bottlenecks, and violations from other agents.
+- `focus_areas`: Optional technology domains to prioritize (e.g. `database`, `caching`, `framework`).
+- `max_options`: Maximum number of options to rank (default: 5).
+
+### Outputs
+- `ranked_options_with_migration_outline`: Technological alternatives ranked by composite score `(benefit * 2) - (effort) - (risk)` with complete multi-phase migration roadmaps, verification criteria, and rollback strategies.
+- `total_options_researched`: Total number of technology candidates evaluated.
+- `pain_points_addressed_count`: Count of active pain points resolved by proposed upgrades.
+- `top_recommendation`: Highest-ranked technology recommendation.
+- `executive_summary`: Strategic research synthesis for engineering leadership.
+
+### Tools
+- `web.search`: Searches technical documentation, package registries, ecosystem benchmarks, and architecture guides for technology alternatives.
+- `docs.fetch`: Fetches official technical documentation, migration guides, changelogs, and release notes from URLs or local files.
 
 ---
 

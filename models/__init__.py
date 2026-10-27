@@ -87,6 +87,16 @@ from .scale_load import (
     ScaleLoadInput,
     ScaleLoadOutput,
 )
+from .tech_scout import (
+    TechCategory,
+    MigrationPhase,
+    MigrationOutline,
+    RankedOption,
+    PainPoint,
+    StackMetadata,
+    TechScoutInput,
+    TechScoutOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -158,6 +168,14 @@ __all__ = [
     "TrafficTarget",
     "ScaleLoadInput",
     "ScaleLoadOutput",
+    "TechCategory",
+    "MigrationPhase",
+    "MigrationOutline",
+    "RankedOption",
+    "PainPoint",
+    "StackMetadata",
+    "TechScoutInput",
+    "TechScoutOutput",
 ]
 
 

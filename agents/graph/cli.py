@@ -21,6 +21,7 @@ from agents.quality.code_quality import CodeQuality
 from agents.safety.security_agent import SecurityAgent
 from agents.runtime.observability_agent import ObservabilityAgent
 from agents.runtime.scale_load_agent import ScaleLoadAgent
+from agents.runtime.tech_scout_agent import TechScoutAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
@@ -28,6 +29,7 @@ from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.observability import ObservabilityInput
 from models.scale_load import ScaleLoadInput, TrafficTarget
+from models.tech_scout import TechScoutInput
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.security import SecurityInput, VulnerabilitySeverity
@@ -146,6 +148,13 @@ def build_parser() -> argparse.ArgumentParser:
     sl_parser.add_argument("--target-rps", type=float, default=100.0, help="Target throughput in requests per second (default: 100.0)")
     sl_parser.add_argument("--target-p99", type=float, default=200.0, help="Target p99 latency SLA in ms (default: 200.0)")
     sl_parser.add_argument("--vus", type=int, default=10, help="Target concurrent virtual users (default: 10)")
+
+    # scout-tech (Tech Scout)
+    ts_parser = subparsers.add_parser("scout-tech", parents=[common_parser], help="Tech Scout researches better technologies and ranks them by benefit, effort, and risk with migration outlines")
+    ts_parser.add_argument("--pain-points", nargs="*", default=None, help="Specific pain points or bottlenecks to address")
+    ts_parser.add_argument("--focus", nargs="*", default=None, help="Focus areas (e.g. database, caching, framework)")
+    ts_parser.add_argument("--max-options", type=int, default=5, help="Maximum number of options to rank (default: 5)")
+
 
 
     # agent logs
@@ -586,12 +595,49 @@ def main():
                 status = "PASS" if lr.thresholds_passed else "FAIL"
                 print(f"   • [{lr.engine.upper()}] [{status}] RPS: {m.rps:.1f} | p50: {m.latency_p50_ms:.1f}ms | p95: {m.latency_p95_ms:.1f}ms | p99: {m.latency_p99_ms:.1f}ms | Error: {m.error_rate_pct:.2f}% ({lr.vus_or_users} VUs)")
 
+    elif args.command == "scout-tech":
+        scout = TechScoutAgent(
+            registry_store=store,
+            repo_root=args.repo,
+        )
+        pain_points = args.pain_points or []
+        focus_areas = args.focus or []
+
+        inp = TechScoutInput(
+            pain_points_from_other_agents=pain_points,
+            focus_areas=focus_areas,
+            max_options=args.max_options,
+        )
+        res = scout.execute(inp)
+
+        print(f"\n🔬 Tech Scout Technology Research Report:")
+        print(f"   • Top Recommendation: {res.top_recommendation or 'None'}")
+        print(f"   • Technologies Researched: {res.total_options_researched}")
+        print(f"   • Pain Points Evaluated: {res.pain_points_addressed_count}")
+        print(f"   • Summary: {res.executive_summary}")
+
+        if res.ranked_options_with_migration_outline:
+            print(f"\n🏆 Ranked Modern Technology Options:")
+            for opt in res.ranked_options_with_migration_outline:
+                print(f"\n   #{opt.rank} [{opt.category.value.upper()}] {opt.title}")
+                print(f"      • Current: '{opt.current_tech}' ➔ Proposed: '{opt.proposed_tech}'")
+                print(f"      • Composite Score: {opt.composite_score} (Benefit: {opt.benefit_score}/10, Effort: {opt.effort_score}/10, Risk: {opt.risk_score}/10)")
+                print(f"      • Benefit: {opt.benefit_rationale}")
+                print(f"      • Effort: {opt.effort_rationale}")
+                print(f"      • Risk: {opt.risk_rationale}")
+                if opt.addresses_pain_points:
+                    print(f"      • Addresses: {'; '.join(opt.addresses_pain_points[:2])}")
+                print(f"      • Migration Outline ({opt.migration_outline.estimated_total_effort_days} days est):")
+                for phase in opt.migration_outline.phases:
+                    print(f"        - Phase {phase.phase_number} ({phase.title}): {phase.description}")
+                print(f"      • Rollback: {opt.migration_outline.rollback_strategy}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/11] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/12] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -615,40 +661,41 @@ def main():
         target_sec = SecurityAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_obs = ObservabilityAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scale = ScaleLoadAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_scout = TechScoutAgent(registry_store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/11] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/12] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/11] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/12] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/11] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/12] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/11] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/12] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/11] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [6/12] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [7/11] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [7/12] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n🛡️  [8/11] Security scanning SAST, secrets, dependency CVEs & configs...")
+        print(f"\n🛡️  [8/12] Security scanning SAST, secrets, dependency CVEs & configs...")
         sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
 
-        print(f"\n📡 [9/11] Observability linking operational telemetry, metrics & traces to code nodes...")
+        print(f"\n📡 [9/12] Observability linking operational telemetry, metrics & traces to code nodes...")
         obs_sample = {
             "metrics": [{"metric_name": "http_request_duration_seconds", "value": 0.12, "baseline": 0.10}],
             "logs": [],
@@ -656,13 +703,20 @@ def main():
         }
         obs_out = target_obs.execute(ObservabilityInput(opentelemetry_and_prometheus_data=obs_sample))
 
-        print(f"\n⚡ [10/11] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
+        print(f"\n⚡ [10/12] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
         scale_out = target_scale.execute(ScaleLoadInput(
             graph_hot_paths=[sample_node],
             traffic_target=TrafficTarget(target_rps=100.0, target_p99_latency_ms=200.0),
         ))
 
-        print(f"\n📊 [11/11] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
+        print(f"\n🔬 [11/12] Tech Scout researching modern upgrades for identified bottlenecks...")
+        scout_pains = [b.title for b in scale_out.bottlenecks] or ["Throughput scaling and query latency"]
+        scout_out = target_scout.execute(TechScoutInput(
+            pain_points_from_other_agents=scout_pains,
+            max_options=3,
+        ))
+
+        print(f"\n📊 [12/12] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -676,9 +730,10 @@ def main():
         print(f"   • Security Vulnerabilities: {len(sec_out.vulnerabilities_with_severity_and_owasp_or_cve_reference)} (Crit: {sec_out.critical_count}, High: {sec_out.high_count})")
         print(f"   • Runtime Health Status: [{obs_out.health_status}]")
         print(f"   • Capacity Status: [{scale_out.capacity_estimate.status.value}] ({scale_out.capacity_estimate.current_max_rps:.1f} max RPS vs {scale_out.capacity_estimate.target_rps:.1f} target)")
+        print(f"   • Top Tech Recommendation: {scout_out.top_recommendation or 'None'}")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 10 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 11 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout) successfully processed real GitHub repository {url}!")
 
 
 
