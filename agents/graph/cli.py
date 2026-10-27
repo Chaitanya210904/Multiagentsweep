@@ -19,11 +19,13 @@ from agents.understanding.impact_analyzer import ImpactAnalyzer
 from agents.quality.architecture_review import ArchitectureReview
 from agents.quality.code_quality import CodeQuality
 from agents.safety.security_agent import SecurityAgent
+from agents.runtime.observability_agent import ObservabilityAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
 from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
+from models.observability import ObservabilityInput
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.security import SecurityInput, VulnerabilitySeverity
@@ -126,6 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
     sec_parser.add_argument("--manifests", nargs="*", default=None, help="Dependency manifests (e.g. requirements.txt, package.json)")
     sec_parser.add_argument("--configs", nargs="*", default=None, help="Infrastructure configs (e.g. Dockerfile, k8s.yaml, .env)")
     sec_parser.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"], default="high", help="Minimum severity to fail audit (default: high)")
+
+    # read-observability (Observability)
+    obs_parser = subparsers.add_parser("read-observability", parents=[common_parser], help="Observability reads logs, metrics, and traces and links problems back to code nodes")
+    obs_parser.add_argument("--telemetry", default=None, help="Path to telemetry bundle file (JSON, log file, or trace file)")
+    obs_parser.add_argument("--prom-url", default=None, help="Optional live Prometheus server URL (e.g. http://localhost:9090)")
+    obs_parser.add_argument("--latency-threshold", type=float, default=500.0, help="Latency spike threshold in ms (default: 500)")
+    obs_parser.add_argument("--error-rate-threshold", type=float, default=1.0, help="Error rate threshold in percentage (default: 1.0 percent)")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -469,12 +478,53 @@ def main():
             if len(res.vulnerabilities_with_severity_and_owasp_or_cve_reference) > 10:
                 print(f"   ... and {len(res.vulnerabilities_with_severity_and_owasp_or_cve_reference) - 10} more vulnerabilities.")
 
+    elif args.command == "read-observability":
+        obs = ObservabilityAgent(
+            registry_store=store,
+            repo_root=args.repo,
+            prometheus_url=args.prom_url,
+        )
+        telemetry_source = args.telemetry
+        if not telemetry_source:
+            default_telemetry = Path(args.repo) / "telemetry.json"
+            telemetry_source = str(default_telemetry) if default_telemetry.exists() else {}
+
+        inp = ObservabilityInput(
+            opentelemetry_and_prometheus_data=telemetry_source,
+            latency_threshold_ms=args.latency_threshold,
+            error_rate_threshold_pct=args.error_rate_threshold,
+        )
+        res = obs.execute(inp)
+
+        status_icon = "🟢 HEALTHY" if res.health_status == "HEALTHY" else ("🟡 DEGRADED" if res.health_status == "DEGRADED" else "🔴 CRITICAL")
+        print(f"\n📊 Operational Observability Report: [{status_icon}]")
+        print(f"   • Health Status: {res.health_status}")
+        print(f"   • Metric Anomalies Detected: {len(res.error_and_latency_anomalies)}")
+        print(f"   • Probable Root Causes Synthesized: {len(res.probable_root_cause_linked_to_nodes)}")
+        print(f"   • Trace Spans Analyzed: {res.total_spans_analyzed}")
+        print(f"   • Log Records Analyzed: {res.total_log_entries_analyzed}")
+        print(f"   • Affected Services: {', '.join(res.affected_services) or 'None'}")
+
+        if res.error_and_latency_anomalies:
+            print(f"\n📈 Metric Anomalies:")
+            for a in res.error_and_latency_anomalies[:5]:
+                print(f"   • [{a.severity.value.upper():<8}] [{a.anomaly_type.value}] {a.metric_name}: {a.current_value} (baseline: {a.baseline_value}, {a.deviation_factor}x)")
+                print(f"     {a.description}")
+
+        if res.probable_root_cause_linked_to_nodes:
+            print(f"\n🎯 Probable Root Causes Linked to Code Nodes:")
+            for rc in res.probable_root_cause_linked_to_nodes[:5]:
+                node_ref = f" -> Node: '{rc.linked_node_id}'" if rc.linked_node_id else ""
+                print(f"   • [{rc.severity.value.upper():<8}] [{rc.confidence_score * 100:.0f}% confidence] {rc.title}{node_ref}")
+                print(f"     Location: {rc.file_path}:{rc.line_number or 1}")
+                print(f"     💡 Remediation: {rc.remediation_suggestion}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/9] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/10] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -496,40 +546,49 @@ def main():
         target_arch = ArchitectureReview(store=target_store, repo_root=str(dest_dir))
         target_quality = CodeQuality(store=target_store, repo_root=str(dest_dir))
         target_sec = SecurityAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_obs = ObservabilityAgent(registry_store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/9] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/10] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/9] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/10] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/9] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/10] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/9] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/10] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/9] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [6/10] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [7/9] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [7/10] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n🛡️  [8/9] Security scanning SAST, secrets, dependency CVEs & configs...")
+        print(f"\n🛡️  [8/10] Security scanning SAST, secrets, dependency CVEs & configs...")
         sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
 
-        print(f"\n📊 [9/9] Pipeline Complete Across Graph, Understanding, Quality & Safety Layers:")
+        print(f"\n📡 [9/10] Observability linking operational telemetry, metrics & traces to code nodes...")
+        obs_sample = {
+            "metrics": [{"metric_name": "http_request_duration_seconds", "value": 0.12, "baseline": 0.10}],
+            "logs": [],
+            "traces": [],
+        }
+        obs_out = target_obs.execute(ObservabilityInput(opentelemetry_and_prometheus_data=obs_sample))
+
+        print(f"\n📊 [10/10] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -541,9 +600,10 @@ def main():
         print(f"   • Quality Findings Pinpointed: {len(quality_out.findings_with_file_and_line)}")
         print(f"   • Security Health Score: {sec_out.security_score}/100.0 (Grade: [{sec_out.security_grade}])")
         print(f"   • Security Vulnerabilities: {len(sec_out.vulnerabilities_with_severity_and_owasp_or_cve_reference)} (Crit: {sec_out.critical_count}, High: {sec_out.high_count})")
+        print(f"   • Runtime Health Status: [{obs_out.health_status}]")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 8 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 9 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability) successfully processed real GitHub repository {url}!")
 
 
 

@@ -17,9 +17,45 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 5. **Safety Layer**:
    - `security` (**Security: Vulnerability scanner**) - *Implemented*
    - Company Rules, Compatibility, Validation
-6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
+6. **Runtime Layer**:
+   - `observability` (**Observability: Logs, metrics and traces reader**) - *Implemented*
+   - DB Heartbeat, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Observability (`observability`)
+
+| Field | Value |
+|---|---|
+| **ID** | `observability` |
+| **Name** | Observability |
+| **Layer** | `runtime` |
+| **Role** | Logs, metrics and traces reader |
+| **Description** | Reads logs, metrics and traces and links problems back to code nodes. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `medium` |
+| **Trigger** | timer and on alert |
+| **Optional** | `false` |
+
+### Inputs
+- `opentelemetry_and_prometheus_data`: Telemetry bundle containing Prometheus metrics, OpenTelemetry structured logs, and distributed traces (JSON dict, file path, or log strings).
+- `service_map`: Optional service topology map linking services, endpoints, and database tables.
+- `latency_threshold_ms`: Latency spike threshold in milliseconds (default: 500ms).
+- `error_rate_threshold_pct`: Error rate spike threshold in percentage (default: 1.0%).
+
+### Outputs
+- `error_and_latency_anomalies`: Detected metric spikes, latency regressions, and operational deviations with severity and baseline deviation factor.
+- `probable_root_cause_linked_to_nodes`: Pinpointed root causes connected to exact code registry nodes and line numbers with confidence scores, trace/span IDs, and actionable remediation suggestions.
+- `health_status`: Overall runtime system health assessment (`HEALTHY`, `DEGRADED`, or `CRITICAL`).
+- `affected_services`: List of unique services affected by active anomalies or incidents.
+
+### Tools
+- `prometheus.query`: Live Prometheus HTTP API client and offline timeseries sample evaluator calculating error rates, request latency, CPU saturation, and database query slowdowns.
+- `logs.search`: Real log parser extracting stack traces across Python tracebacks, JavaScript/Node.js stack frames, Java exceptions, and structured OpenTelemetry OTLP JSON logs.
+- `traces.search`: Distributed trace evaluator analyzing OpenTelemetry OTLP, Jaeger, and Zipkin spans for error status, exception events, and latency bottlenecks exceeding thresholds.
+- `registry.lookup`: Code registry lookup tool linking runtime problems directly back to canonical code nodes (`API`, `FUNCTION`, `CLASS`, `FILE`).
 
 ---
 

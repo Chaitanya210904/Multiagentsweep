@@ -67,6 +67,14 @@ from .security import (
     SecurityInput,
     SecurityOutput,
 )
+from .observability import (
+    AnomalyType,
+    AnomalySeverity,
+    MetricAnomaly,
+    ProbableRootCause,
+    ObservabilityInput,
+    ObservabilityOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -122,6 +130,12 @@ __all__ = [
     "SecurityVulnerability",
     "SecurityInput",
     "SecurityOutput",
+    "AnomalyType",
+    "AnomalySeverity",
+    "MetricAnomaly",
+    "ProbableRootCause",
+    "ObservabilityInput",
+    "ObservabilityOutput",
 ]
 
 

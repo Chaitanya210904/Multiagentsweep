@@ -14,6 +14,9 @@ from .coverage_parser import CoverageParserTool
 from .semgrep_tool import SemgrepTool
 from .gitleaks_tool import GitleaksTool
 from .trivy_tool import TrivyTool
+from .prometheus_query_tool import PrometheusQueryTool
+from .logs_search_tool import LogsSearchTool, LogIncident
+from .traces_search_tool import TracesSearchTool, TraceIncident
 
 __all__ = [
     "RegistryReadTool",
@@ -32,5 +35,10 @@ __all__ = [
     "SemgrepTool",
     "GitleaksTool",
     "TrivyTool",
+    "PrometheusQueryTool",
+    "LogsSearchTool",
+    "LogIncident",
+    "TracesSearchTool",
+    "TraceIncident",
 ]
 
