@@ -801,33 +801,33 @@ def main():
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/12] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [4/14] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/12] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [5/14] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/12] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [6/14] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/12] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [7/14] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [7/12] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [8/14] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n🛡️  [8/12] Security scanning SAST, secrets, dependency CVEs & configs...")
+        print(f"\n🛡️  [9/14] Security scanning SAST, secrets, dependency CVEs & configs...")
         sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
 
-        print(f"\n📡 [9/12] Observability linking operational telemetry, metrics & traces to code nodes...")
+        print(f"\n📡 [10/14] Observability linking operational telemetry, metrics & traces to code nodes...")
         obs_sample = {
             "metrics": [{"metric_name": "http_request_duration_seconds", "value": 0.12, "baseline": 0.10}],
             "logs": [],
@@ -835,22 +835,22 @@ def main():
         }
         obs_out = target_obs.execute(ObservabilityInput(opentelemetry_and_prometheus_data=obs_sample))
 
-        print(f"\n⚡ [10/12] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
+        print(f"\n⚡ [11/14] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
         scale_out = target_scale.execute(ScaleLoadInput(
             graph_hot_paths=[sample_node],
             traffic_target=TrafficTarget(target_rps=100.0, target_p99_latency_ms=200.0),
         ))
 
-        print(f"\n🔬 [11/13] Tech Scout researching modern upgrades for identified bottlenecks...")
+        print(f"\n🔬 [12/14] Tech Scout researching modern upgrades for identified bottlenecks...")
         scout_pains = [b.title for b in scale_out.bottlenecks] or ["Throughput scaling and query latency"]
         scout_out = target_scout.execute(TechScoutInput(
             pain_points_from_other_agents=scout_pains,
             max_options=3,
         ))
 
-        print(f"\n🧪 [12/13] Test Generation synthesizing unit tests for coverage gaps (approval gate & dry-run)...")
+        print(f"\n🧪 [13/14] Test Generation synthesizing unit tests for coverage gaps (approval gate & dry-run)...")
         testgen_targets = sample_files[:2] if sample_files else []
-        testgen_gaps = impact_out.untested_nodes[:3] if impact_out.untested_nodes else []
+        testgen_gaps = impact_out.affected_nodes_and_services.untested_nodes[:3] if impact_out.affected_nodes_and_services else []
         testgen_out = target_testgen.execute(TestGenerationInput(
             code_under_test=testgen_targets,
             coverage_gaps=testgen_gaps,
@@ -858,7 +858,7 @@ def main():
             dry_run=True,
         ))
 
-        print(f"\n📊 [13/13] Pipeline Complete Across Graph, Understanding, Quality, Safety, Runtime & Optional Layers:")
+        print(f"\n📊 [14/14] Pipeline Complete Across Graph, Understanding, Quality, Safety, Runtime & Optional Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
