@@ -20,12 +20,14 @@ from agents.quality.architecture_review import ArchitectureReview
 from agents.quality.code_quality import CodeQuality
 from agents.safety.security_agent import SecurityAgent
 from agents.runtime.observability_agent import ObservabilityAgent
+from agents.runtime.scale_load_agent import ScaleLoadAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
 from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.observability import ObservabilityInput
+from models.scale_load import ScaleLoadInput, TrafficTarget
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
 from models.security import SecurityInput, VulnerabilitySeverity
@@ -135,6 +137,16 @@ def build_parser() -> argparse.ArgumentParser:
     obs_parser.add_argument("--prom-url", default=None, help="Optional live Prometheus server URL (e.g. http://localhost:9090)")
     obs_parser.add_argument("--latency-threshold", type=float, default=500.0, help="Latency spike threshold in ms (default: 500)")
     obs_parser.add_argument("--error-rate-threshold", type=float, default=1.0, help="Error rate threshold in percentage (default: 1.0 percent)")
+
+    # analyze-scale-load (Scale & Load)
+    sl_parser = subparsers.add_parser("analyze-scale-load", parents=[common_parser], help="Scale & Load finds N+1 queries, missing indexes, caching gaps, runs load tests, and estimates capacity")
+    sl_parser.add_argument("--hot-paths", nargs="*", default=None, help="Hot path node IDs or endpoint routes to evaluate")
+    sl_parser.add_argument("--query-logs", default=None, help="Path to database query log file (SQL, log, JSON)")
+    sl_parser.add_argument("--load-scripts", nargs="*", default=None, help="Paths to k6 (.js) or Locust (.py / stats.csv) load test scripts")
+    sl_parser.add_argument("--target-rps", type=float, default=100.0, help="Target throughput in requests per second (default: 100.0)")
+    sl_parser.add_argument("--target-p99", type=float, default=200.0, help="Target p99 latency SLA in ms (default: 200.0)")
+    sl_parser.add_argument("--vus", type=int, default=10, help="Target concurrent virtual users (default: 10)")
+
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -519,12 +531,67 @@ def main():
                 print(f"     Location: {rc.file_path}:{rc.line_number or 1}")
                 print(f"     💡 Remediation: {rc.remediation_suggestion}")
 
+    elif args.command == "analyze-scale-load":
+        sl_agent = ScaleLoadAgent(
+            registry_store=store,
+            repo_root=args.repo,
+        )
+        hot_paths = args.hot_paths or []
+        query_logs = args.query_logs or []
+        load_scripts = args.load_scripts or []
+
+        inp = ScaleLoadInput(
+            graph_hot_paths=hot_paths,
+            query_logs=query_logs,
+            k6_or_locust_scripts=load_scripts,
+            traffic_target=TrafficTarget(
+                target_rps=args.target_rps,
+                target_p99_latency_ms=args.target_p99,
+                peak_concurrent_users=args.vus,
+            ),
+        )
+        res = sl_agent.execute(inp)
+
+        status_icon = "🟢 SUFFICIENT" if res.capacity_estimate.status.value == "CAPACITY_SUFFICIENT" else (
+            "🟡 MARGINAL" if res.capacity_estimate.status.value == "CAPACITY_MARGINAL" else "🔴 DEFICIT"
+        )
+        print(f"\n⚡ Scale & Load Capacity Report: [{status_icon}]")
+        print(f"   • Capacity Status: {res.capacity_estimate.status.value}")
+        print(f"   • Current Max Throughput: {res.capacity_estimate.current_max_rps:.1f} RPS")
+        print(f"   • Target Traffic SLA: {res.capacity_estimate.target_rps:.1f} RPS (Headroom: {res.capacity_estimate.headroom_multiplier}x, Gap: {res.capacity_estimate.capacity_gap_pct:+.1f}%)")
+        print(f"   • Estimated Horizontal Scale: {res.capacity_estimate.estimated_required_instances} instance(s) required")
+        print(f"   • Primary Limiting Factor: {res.capacity_estimate.limiting_factor}")
+        print(f"   • Caching Strategy: {res.capacity_estimate.recommended_cache_strategy} (Estimated impact: {res.capacity_estimate.caching_throughput_multiplier}x throughput)")
+        print(f"   • Bottlenecks Pinpointed: {len(res.bottlenecks)}")
+        print(f"   • Load Tests Evaluated: {len(res.load_test_results)}")
+
+        if res.bottlenecks:
+            print(f"\n🚧 Detected Bottlenecks (N+1 queries, missing indexes, caching gaps):")
+            for b in res.bottlenecks[:5]:
+                node_ref = f" -> Node: '{b.linked_node_id}'" if b.linked_node_id else ""
+                loc_ref = f" ({b.file_path}:{b.line_number})" if b.file_path else ""
+                print(f"   • [{b.severity.value.upper():<8}] [{b.type.value}] {b.title}{node_ref}{loc_ref}")
+                print(f"     {b.description}")
+                print(f"     💡 Remediation: {b.remediation}")
+
+        if res.capacity_estimate.recommended_indexes:
+            print(f"\n🗄️  Recommended Index DDLs:")
+            for idx in res.capacity_estimate.recommended_indexes[:5]:
+                print(f"   • {idx}")
+
+        if res.load_test_results:
+            print(f"\n⏱️  Load Test Performance Results:")
+            for lr in res.load_test_results:
+                m = lr.metrics
+                status = "PASS" if lr.thresholds_passed else "FAIL"
+                print(f"   • [{lr.engine.upper()}] [{status}] RPS: {m.rps:.1f} | p50: {m.latency_p50_ms:.1f}ms | p95: {m.latency_p95_ms:.1f}ms | p99: {m.latency_p99_ms:.1f}ms | Error: {m.error_rate_pct:.2f}% ({lr.vus_or_users} VUs)")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/10] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/11] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -547,40 +614,41 @@ def main():
         target_quality = CodeQuality(store=target_store, repo_root=str(dest_dir))
         target_sec = SecurityAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_obs = ObservabilityAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_scale = ScaleLoadAgent(registry_store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/10] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/11] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/10] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/11] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/10] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/11] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/10] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/11] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/10] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [6/11] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [7/10] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [7/11] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n🛡️  [8/10] Security scanning SAST, secrets, dependency CVEs & configs...")
+        print(f"\n🛡️  [8/11] Security scanning SAST, secrets, dependency CVEs & configs...")
         sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
 
-        print(f"\n📡 [9/10] Observability linking operational telemetry, metrics & traces to code nodes...")
+        print(f"\n📡 [9/11] Observability linking operational telemetry, metrics & traces to code nodes...")
         obs_sample = {
             "metrics": [{"metric_name": "http_request_duration_seconds", "value": 0.12, "baseline": 0.10}],
             "logs": [],
@@ -588,7 +656,13 @@ def main():
         }
         obs_out = target_obs.execute(ObservabilityInput(opentelemetry_and_prometheus_data=obs_sample))
 
-        print(f"\n📊 [10/10] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
+        print(f"\n⚡ [10/11] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
+        scale_out = target_scale.execute(ScaleLoadInput(
+            graph_hot_paths=[sample_node],
+            traffic_target=TrafficTarget(target_rps=100.0, target_p99_latency_ms=200.0),
+        ))
+
+        print(f"\n📊 [11/11] Pipeline Complete Across Graph, Understanding, Quality, Safety & Runtime Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -601,9 +675,11 @@ def main():
         print(f"   • Security Health Score: {sec_out.security_score}/100.0 (Grade: [{sec_out.security_grade}])")
         print(f"   • Security Vulnerabilities: {len(sec_out.vulnerabilities_with_severity_and_owasp_or_cve_reference)} (Crit: {sec_out.critical_count}, High: {sec_out.high_count})")
         print(f"   • Runtime Health Status: [{obs_out.health_status}]")
+        print(f"   • Capacity Status: [{scale_out.capacity_estimate.status.value}] ({scale_out.capacity_estimate.current_max_rps:.1f} max RPS vs {scale_out.capacity_estimate.target_rps:.1f} target)")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 9 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 10 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load) successfully processed real GitHub repository {url}!")
+
 
 
 

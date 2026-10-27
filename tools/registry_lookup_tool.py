@@ -22,6 +22,10 @@ class RegistryLookupTool:
         """Fetch node by canonical ID."""
         return self._store.get(node_id)
 
+    def get_by_id(self, node_id: str) -> Optional[RegistryNode]:
+        """Alias for get()."""
+        return self.get(node_id)
+
     def get_by_path(self, path: str) -> List[RegistryNode]:
         """Fetch all active nodes defined in a specific file path."""
         return self._store.get_by_path(path, include_deleted=False)

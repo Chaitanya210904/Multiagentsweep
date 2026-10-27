@@ -17,6 +17,8 @@ from .trivy_tool import TrivyTool
 from .prometheus_query_tool import PrometheusQueryTool
 from .logs_search_tool import LogsSearchTool, LogIncident
 from .traces_search_tool import TracesSearchTool, TraceIncident
+from .k6_tool import K6Tool
+from .locust_tool import LocustTool
 
 __all__ = [
     "RegistryReadTool",
@@ -40,5 +42,7 @@ __all__ = [
     "LogIncident",
     "TracesSearchTool",
     "TraceIncident",
+    "K6Tool",
+    "LocustTool",
 ]
 

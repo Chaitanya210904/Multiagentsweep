@@ -75,6 +75,18 @@ from .observability import (
     ObservabilityInput,
     ObservabilityOutput,
 )
+from .scale_load import (
+    BottleneckType,
+    BottleneckSeverity,
+    Bottleneck,
+    HttpMetricSummary,
+    LoadTestResult,
+    CapacityStatus,
+    CapacityEstimate,
+    TrafficTarget,
+    ScaleLoadInput,
+    ScaleLoadOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -136,6 +148,16 @@ __all__ = [
     "ProbableRootCause",
     "ObservabilityInput",
     "ObservabilityOutput",
+    "BottleneckType",
+    "BottleneckSeverity",
+    "Bottleneck",
+    "HttpMetricSummary",
+    "LoadTestResult",
+    "CapacityStatus",
+    "CapacityEstimate",
+    "TrafficTarget",
+    "ScaleLoadInput",
+    "ScaleLoadOutput",
 ]
 
 

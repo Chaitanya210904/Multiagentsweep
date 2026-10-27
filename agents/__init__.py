@@ -28,6 +28,9 @@ from .runtime import (
     OBSERVABILITY_METADATA,
     ObservabilityAgent,
     Observability,
+    SCALE_LOAD_METADATA,
+    ScaleLoadAgent,
+    ScaleLoad,
 )
 
 __all__ = [
@@ -53,4 +56,7 @@ __all__ = [
     "OBSERVABILITY_METADATA",
     "ObservabilityAgent",
     "Observability",
+    "SCALE_LOAD_METADATA",
+    "ScaleLoadAgent",
+    "ScaleLoad",
 ]

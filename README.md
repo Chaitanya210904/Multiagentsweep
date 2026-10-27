@@ -19,9 +19,42 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - Company Rules, Compatibility, Validation
 6. **Runtime Layer**:
    - `observability` (**Observability: Logs, metrics and traces reader**) - *Implemented*
-   - DB Heartbeat, Scale & Load, Tech Scout
+   - `scale_load` (**Scale & Load: Capacity analyst**) - *Implemented*
+   - DB Heartbeat, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Scale & Load (`scale_load`)
+
+| Field | Value |
+|---|---|
+| **ID** | `scale_load` |
+| **Name** | Scale & Load |
+| **Layer** | `runtime` |
+| **Role** | Capacity analyst |
+| **Description** | Finds N+1 queries, missing indexes and caching gaps, runs load tests, and estimates capacity. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `medium` |
+| **Trigger** | on request and before release |
+| **Optional** | `false` |
+
+### Inputs
+- `graph_hot_paths`: High-frequency code/system nodes, routes, or transaction paths in the graph.
+- `query_logs`: Database slow query logs, ORM statement traces, or execution log records.
+- `k6_or_locust_scripts`: k6 JavaScript scripts or Locust Python scenario files or configs.
+- `traffic_target`: Target traffic requirements (`target_rps`, `peak_concurrent_users`, `target_p99_latency_ms`).
+
+### Outputs
+- `bottlenecks`: Pinpointed N+1 queries, missing indexes, caching gaps, and hot paths with exact file/line locations and remediation strategies.
+- `load_test_results`: Outcomes and HTTP latency distributions from k6 and Locust load tests (RPS, p50, p90, p95, p99, error rate).
+- `capacity_estimate`: Capacity projection, max sustainable throughput (RPS), headroom multiplier, and horizontal scaling estimates.
+
+### Tools
+- `k6`: Executes or evaluates k6 load testing scripts, parses k6 execution metrics, and verifies performance thresholds.
+- `locust`: Executes or evaluates Locust load testing scenarios, parses Locust CSV/JSON execution stats, and profiles endpoint throughput.
+- `graph.traverse`: Traverses downstream dependencies from hot path roots to uncover complex multi-table query chains and services.
 
 ---
 
