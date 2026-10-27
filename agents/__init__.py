@@ -19,6 +19,11 @@ from .quality import (
     CODE_QUALITY_METADATA,
     CodeQuality,
 )
+from .safety import (
+    SECURITY_METADATA,
+    SecurityAgent,
+    Security,
+)
 
 __all__ = [
     "AgentMetadata",
@@ -37,4 +42,7 @@ __all__ = [
     "ArchitectureReview",
     "CODE_QUALITY_METADATA",
     "CodeQuality",
+    "SECURITY_METADATA",
+    "SecurityAgent",
+    "Security",
 ]

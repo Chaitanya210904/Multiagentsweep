@@ -14,10 +14,48 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 4. **Quality Layer**:
    - `architecture_review` (**Architecture Review: Structure checker**) - *Implemented*
    - `code_quality` (**Code Quality: Maintainability checker**) - *Implemented*
-5. **Safety Layer**: Security, Company Rules, Compatibility, Validation
+5. **Safety Layer**:
+   - `security` (**Security: Vulnerability scanner**) - *Implemented*
+   - Company Rules, Compatibility, Validation
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Security (`security`)
+
+| Field | Value |
+|---|---|
+| **ID** | `security` |
+| **Name** | Security |
+| **Layer** | `safety` |
+| **Role** | Vulnerability scanner |
+| **Description** | Runs SAST, secret scanning, dependency CVE checks, and auth and input reviews. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `medium` |
+| **Trigger** | on changed code or dependencies |
+| **Optional** | `false` |
+
+### Inputs
+- `changed_code`: Source code files that changed or need security review.
+- `dependency_manifests`: Manifest files (`requirements.txt`, `package.json`, `Pipfile`, `pyproject.toml`).
+- `configs`: Configuration files (`Dockerfile`, `k8s.yaml`, `docker-compose.yml`, `.env`).
+- `cve_feeds`: Optional custom CVE feeds, lists, or vulnerability database overrides.
+- `fail_on_severity`: Minimum severity threshold to fail policy compliance (`HIGH` by default).
+
+### Outputs
+- `vulnerabilities_with_severity_and_owasp_or_cve_reference`: Pinpointed security vulnerabilities with severity, exact line numbers, and OWASP Top 10, CWE, or CVE references.
+- `security_score`: Calibrated security health score from 0.0 to 100.0.
+- `security_grade`: Security letter grade (`A`, `B`, `C`, `D`, `F`).
+- `critical_count` / `high_count` / `medium_count` / `low_count` / `info_count`: Granular severity breakdown.
+- `passed`: Boolean indicating if codebase passes security threshold.
+
+### Tools
+- `semgrep`: SAST engine analyzing code for SQLi, Command Injection, Insecure Deserialization, eval/exec, weak crypto, and missing authentication decorators.
+- `gitleaks`: Dedicated secret scanner detecting API keys, AWS keys, GitHub tokens, Slack tokens, private keys, and database credentials with Shannon entropy filtering and snippet redaction.
+- `trivy`: Dependency CVE auditor matching manifest versions against known CVEs and auditing Dockerfile/K8s/Compose misconfigurations.
+- `registry.lookup`: Code registry lookup tool to enrich findings with public API route and database table context.
 
 ---
 

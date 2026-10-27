@@ -18,6 +18,7 @@ from agents.graph.data_service_mapper import DataServiceMapper
 from agents.understanding.impact_analyzer import ImpactAnalyzer
 from agents.quality.architecture_review import ArchitectureReview
 from agents.quality.code_quality import CodeQuality
+from agents.safety.security_agent import SecurityAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
@@ -25,6 +26,7 @@ from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.registry import NodeType
 from models.relationship import EdgeType, RelationshipLinkerInput
+from models.security import SecurityInput, VulnerabilitySeverity
 from models.structure import RepoShard, StructureMapperInput
 from storage.registry_store import CodeRegistryStore
 
@@ -117,6 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
     qual_parser.add_argument("--coverage", default=None, help="Path to coverage report (JSON, XML, LCOV)")
     qual_parser.add_argument("--max-complexity", type=int, default=10, help="Maximum cyclomatic complexity threshold (default: 10)")
     qual_parser.add_argument("--max-lines", type=int, default=50, help="Maximum function lines threshold (default: 50)")
+
+    # check-security (Security)
+    sec_parser = subparsers.add_parser("check-security", parents=[common_parser], help="Security runs SAST, secret scanning, dependency CVE checks, and auth/input reviews")
+    sec_parser.add_argument("files", nargs="*", default=None, help="Source code files to audit (defaults to registered files)")
+    sec_parser.add_argument("--manifests", nargs="*", default=None, help="Dependency manifests (e.g. requirements.txt, package.json)")
+    sec_parser.add_argument("--configs", nargs="*", default=None, help="Infrastructure configs (e.g. Dockerfile, k8s.yaml, .env)")
+    sec_parser.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"], default="high", help="Minimum severity to fail audit (default: high)")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -423,12 +432,49 @@ def main():
             if len(res.findings_with_file_and_line) > 10:
                 print(f"   ... and {len(res.findings_with_file_and_line) - 10} more findings.")
 
+    elif args.command == "check-security":
+        sec = SecurityAgent(registry_store=store, repo_root=args.repo)
+        target_files = args.files
+        if not target_files:
+            target_files = [n.location.path for n in store.list_all() if n.type == NodeType.FILE][:20]
+
+        manifests = args.manifests or []
+        configs = args.configs or []
+        fail_sev = VulnerabilitySeverity(args.fail_on)
+
+        inp = SecurityInput(
+            changed_code=target_files,
+            dependency_manifests=manifests,
+            configs=configs,
+            fail_on_severity=fail_sev,
+        )
+        res = sec.execute(inp)
+
+        status_icon = "✅ PASSED" if res.passed else "❌ FAILED"
+        print(f"\n🛡️  Security Audit Report: {status_icon}")
+        print(f"   • Security Health Score: {res.security_score}/100.0 (Grade: [{res.security_grade}])")
+        print(f"   • Files Evaluated: {res.scanned_files_count}")
+        print(f"   • Total Vulnerabilities: {len(res.vulnerabilities_with_severity_and_owasp_or_cve_reference)}")
+        print(f"   • Severity Breakdown: 🔴 {res.critical_count} Critical, 🟠 {res.high_count} High, 🟡 {res.medium_count} Medium, 🟢 {res.low_count} Low, ℹ️ {res.info_count} Info")
+
+        if res.vulnerabilities_with_severity_and_owasp_or_cve_reference:
+            print(f"\n🚨 Pinpointed Vulnerabilities with OWASP/CVE References:")
+            for v in res.vulnerabilities_with_severity_and_owasp_or_cve_reference[:10]:
+                ref = v.cve_id or v.owasp_category or v.cwe_id or v.rule_id
+                print(f"   • [{v.severity.value.upper():<8}] [{v.category.value:<16}] {v.file_path}:{v.line_number} ({ref})")
+                print(f"     Title: {v.title}")
+                print(f"     💡 Remediation: {v.remediation}")
+                if v.code_snippet:
+                    print(f"     Snippet: {v.code_snippet}")
+            if len(res.vulnerabilities_with_severity_and_owasp_or_cve_reference) > 10:
+                print(f"   ... and {len(res.vulnerabilities_with_severity_and_owasp_or_cve_reference) - 10} more vulnerabilities.")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/8] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/9] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -449,37 +495,41 @@ def main():
         target_impact = ImpactAnalyzer(store=target_store, repo_root=str(dest_dir))
         target_arch = ArchitectureReview(store=target_store, repo_root=str(dest_dir))
         target_quality = CodeQuality(store=target_store, repo_root=str(dest_dir))
+        target_sec = SecurityAgent(registry_store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/8] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/9] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [3/8] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [3/9] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [4/8] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [4/9] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [5/8] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [5/9] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [6/8] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [6/9] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [7/8] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [7/9] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n📊 [8/8] Pipeline Complete Across Graph, Understanding & Quality Layers:")
+        print(f"\n🛡️  [8/9] Security scanning SAST, secrets, dependency CVEs & configs...")
+        sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
+
+        print(f"\n📊 [9/9] Pipeline Complete Across Graph, Understanding, Quality & Safety Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -489,9 +539,11 @@ def main():
         print(f"   • Clean Architecture Score: {arch_out.clean_architecture_score}/100.0")
         print(f"   • Code Maintainability Rating: [{quality_out.maintainability_rating}] ({quality_out.technical_debt_minutes} min debt)")
         print(f"   • Quality Findings Pinpointed: {len(quality_out.findings_with_file_and_line)}")
+        print(f"   • Security Health Score: {sec_out.security_score}/100.0 (Grade: [{sec_out.security_grade}])")
+        print(f"   • Security Vulnerabilities: {len(sec_out.vulnerabilities_with_severity_and_owasp_or_cve_reference)} (Crit: {sec_out.critical_count}, High: {sec_out.high_count})")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 7 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 8 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security) successfully processed real GitHub repository {url}!")
 
 
 

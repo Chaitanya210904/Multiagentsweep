@@ -11,6 +11,9 @@ from .sonarqube_tool import SonarQubeTool
 from .ruff_tool import RuffTool
 from .eslint_tool import ESLintTool
 from .coverage_parser import CoverageParserTool
+from .semgrep_tool import SemgrepTool
+from .gitleaks_tool import GitleaksTool
+from .trivy_tool import TrivyTool
 
 __all__ = [
     "RegistryReadTool",
@@ -26,5 +29,8 @@ __all__ = [
     "RuffTool",
     "ESLintTool",
     "CoverageParserTool",
+    "SemgrepTool",
+    "GitleaksTool",
+    "TrivyTool",
 ]
 

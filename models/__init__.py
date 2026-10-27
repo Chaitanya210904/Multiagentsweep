@@ -60,6 +60,13 @@ from .code_quality import (
     CodeQualityInput,
     CodeQualityOutput,
 )
+from .security import (
+    VulnerabilitySeverity,
+    VulnerabilityCategory,
+    SecurityVulnerability,
+    SecurityInput,
+    SecurityOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -110,6 +117,11 @@ __all__ = [
     "CoverageSummary",
     "CodeQualityInput",
     "CodeQualityOutput",
+    "VulnerabilitySeverity",
+    "VulnerabilityCategory",
+    "SecurityVulnerability",
+    "SecurityInput",
+    "SecurityOutput",
 ]
 
 
