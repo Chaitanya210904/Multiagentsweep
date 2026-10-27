@@ -6,8 +6,8 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 1. **Control Layer**: Orchestrator, Aggregator + Critic
 2. **Graph Layer**:
    - `registry_keeper` (**Registry Keeper (the list)**) - *Implemented*
-   - `structure_mapper` (Structure Mapper: nodes)
-   - `relationship_linker` (Relationship Linker: code edges)
+   - `structure_mapper` (**Structure Mapper: nodes**) - *Implemented*
+   - `relationship_linker` (**Relationship Linker: code edges**) - *Implemented*
    - `data_service_mapper` (Data & Service Mapper: system edges)
 3. **Understanding Layer**: Impact Analyzer
 4. **Quality Layer**: Architecture Review, Code Quality
@@ -15,6 +15,68 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 6. **Runtime Layer**: DB Heartbeat, Observability, Scale & Load, Tech Scout
 7. **Action Layer**: Implementer
 8. **Optional Layer**: Test Generation, Cost & Token Governor, Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Relationship Linker (`relationship_linker`)
+
+| Field | Value |
+|---|---|
+| **ID** | `relationship_linker` |
+| **Name** | Relationship Linker |
+| **Layer** | `graph` |
+| **Role** | Graph agent 2: code edges |
+| **Description** | Creates calls, imports, inheritance and test-to-code edges. Looks up both endpoints in the registry first; missing endpoints go to the unresolved queue, never guessed. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | After Structure Mapper; parallel with Data & Service Mapper |
+| **Optional** | `false` |
+
+### Inputs
+- `nodes_from_structure_mapper`: Nodes extracted from the repository shard.
+- `registry_lookups`: Queries to verify endpoint existence in the Code Registry.
+
+### Outputs
+- `verified_edges`: List of verified `CodeEdge` objects (calls, imports, inheritance, test-to-code) where both endpoints exist in the registry.
+- `unresolved_link_queue`: Potential links where one or both endpoints could not be verified (never guessed).
+- `registry_update_proposals`: Formulated update proposals packaged for Registry Keeper.
+
+### Tools
+- `registry.lookup`: Lookup nodes by ID, path, or type to verify endpoints.
+- `registry.propose`: Package verified edges into structured `UpdateProposal` objects.
+- `graph.write_edge`: Create, validate, and record graph edges between verified endpoints.
+
+---
+
+## Production CLI Usage
+
+The Graph Layer agents can be executed directly from the terminal against any real repository:
+
+```bash
+# 1. Scan a real codebase with Structure Mapper & Registry Keeper
+python -m agents.graph.cli scan --repo .
+
+# 2. Extract and verify code edges with Relationship Linker
+python -m agents.graph.cli link-edges --repo .
+
+# 3. Register verified edges directly with Registry Keeper
+python -m agents.graph.cli link-edges --repo . --register
+
+# 4. Test all 3 Graph Agents on any real GitHub repository
+python -m agents.graph.cli test-github https://github.com/bottlepy/bottle
+
+# 5. View live structured execution logs
+python -m agents.graph.cli logs --limit 20
+```
+
+---
+
+## Running Test Suite
+
+```bash
+PYTHONPATH=. .venv/bin/pytest tests/ -v
+```
+
 
 ---
 

@@ -26,6 +26,14 @@ class RegistryLookupTool:
         """Fetch all active nodes defined in a specific file path."""
         return self._store.get_by_path(path, include_deleted=False)
 
+    def get_by_type(self, node_type: NodeType) -> List[RegistryNode]:
+        """Fetch all active nodes of a specific type (e.g. all classes, all functions)."""
+        return self._store.get_by_type(node_type, include_deleted=False)
+
+    def find_by_type(self, node_type: NodeType) -> List[RegistryNode]:
+        """Alias for get_by_type."""
+        return self.get_by_type(node_type)
+
     def search(
         self,
         node_id: Optional[str] = None,

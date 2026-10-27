@@ -19,6 +19,13 @@ from .structure import (
     StructureMapperInput,
     StructureMapperOutput,
 )
+from .relationship import (
+    EdgeType,
+    CodeEdge,
+    UnresolvedLink,
+    RelationshipLinkerInput,
+    RelationshipLinkerOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -38,4 +45,10 @@ __all__ = [
     "DEFAULT_LANGUAGE_CONFIGS",
     "StructureMapperInput",
     "StructureMapperOutput",
+    "EdgeType",
+    "CodeEdge",
+    "UnresolvedLink",
+    "RelationshipLinkerInput",
+    "RelationshipLinkerOutput",
 ]
+

@@ -13,10 +13,13 @@ from typing import Optional
 
 from agents.graph.registry_keeper import RegistryKeeper
 from agents.graph.structure_mapper import StructureMapper
+from agents.graph.relationship_linker import RelationshipLinker
 from core.logger import AgentLogger, agent_logger
 from models.registry import NodeType
+from models.relationship import EdgeType, RelationshipLinkerInput
 from models.structure import RepoShard, StructureMapperInput
 from storage.registry_store import CodeRegistryStore
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
     shard_parser.add_argument("shard_path", help="Path to shard folder or file")
     shard_parser.add_argument("--register", action="store_true", help="Immediately register proposals with Registry Keeper")
     shard_parser.add_argument("--only-changed", action="store_true", help="Only propose modified or new nodes")
+
+    # link-edges (Relationship Linker)
+    link_parser = subparsers.add_parser("link-edges", parents=[common_parser], help="Relationship Linker creates calls, imports, inheritance, and test-to-code edges")
+    link_parser.add_argument("--shard", default=None, help="Scope edge linking to a specific directory shard")
+    link_parser.add_argument("--register", action="store_true", help="Immediately register verified edges with Registry Keeper")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -211,12 +219,32 @@ def main():
                 else:
                     agent_logger._write_to_console(r)
 
+    elif args.command == "link-edges":
+        linker = RelationshipLinker(store=store, repo_root=args.repo)
+        if args.register:
+            keeper = RegistryKeeper(store=store, repo_root=args.repo)
+            linker_out, keeper_out = linker.link_and_register(registry_keeper=keeper, shard_path=args.shard)
+            print(f"🔗 [Relationship Linker] Verified {len(linker_out.verified_edges)} code edges.")
+            print(f"⚠️  [Relationship Linker] Unresolved queue: {len(linker_out.unresolved_link_queue)} links (never guessed).")
+            print(f"✅ Registered {len(linker_out.registry_update_proposals)} edge proposals with Registry Keeper.")
+        else:
+            inputs = RelationshipLinkerInput(shard_path=args.shard)
+            linker_out = linker.execute(inputs)
+            print(f"🔗 [Relationship Linker] Verified {len(linker_out.verified_edges)} code edges:")
+            for e in linker_out.verified_edges[:10]:
+                print(f"   • [{e.type.value:<12}] {e.source_id}  -->  {e.target_id}")
+            if len(linker_out.verified_edges) > 10:
+                print(f"   ... and {len(linker_out.verified_edges) - 10} more.")
+            print(f"⚠️  Unresolved link queue ({len(linker_out.unresolved_link_queue)} items - never guessed):")
+            for u in linker_out.unresolved_link_queue[:5]:
+                print(f"   • [{u.edge_type.value}] {u.source_path}: '{u.raw_target}' -> {u.reason}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/4] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/5] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -232,30 +260,38 @@ def main():
         target_store = CodeRegistryStore(persistence_path=str(storage_file))
         target_keeper = RegistryKeeper(store=target_store, repo_root=str(dest_dir))
         target_mapper = StructureMapper(store=target_store, repo_root=str(dest_dir))
+        target_linker = RelationshipLinker(store=target_store, repo_root=str(dest_dir))
 
-        print(f"\n🗺️  [2/4] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [2/5] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n📊 [3/4] Registration complete with Registry Keeper:")
+        print(f"\n🔗 [3/5] Relationship Linker analyzing and verifying code edges...")
+        linker_out, keeper_edges_out = target_linker.link_and_register(
+            registry_keeper=target_keeper,
+        )
+
+        print(f"\n📊 [4/5] Registration Complete for All 3 Graph Agents:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
-        print(f"   • Real code entities extracted: {len(mapper_out.nodes)}")
-        print(f"   • Total active nodes in registry: {keeper_out.stats.get('total_active_nodes')}")
-        print(f"   • Audit change log records: {len(keeper_out.change_log)}")
+        print(f"   • Real code nodes extracted: {len(mapper_out.nodes)}")
+        print(f"   • Total verified code edges: {len(linker_out.verified_edges)}")
+        for etype, cnt in linker_out.stats.get("edges_by_type", {}).items():
+            print(f"       - {etype}: {cnt}")
+        print(f"   • Unresolved links queued (zero guessing): {len(linker_out.unresolved_link_queue)}")
+        print(f"   • Total active registry nodes: {keeper_edges_out.stats.get('total_active_nodes')}")
+        print(f"   • Audit change log records: {len(keeper_edges_out.change_log)}")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🔍 [4/4] Sample of real registered code entities from {repo_name}:")
-        for node in mapper_out.nodes[:8]:
-            scip = node.metadata.get("scip_symbol", "")
-            print(f"   • [{node.type.value:<8}] {node.id}")
-            if scip:
-                print(f"     SCIP: {scip}")
-        if len(mapper_out.nodes) > 8:
-            print(f"   ... and {len(mapper_out.nodes) - 8} more real entities.")
+        print(f"\n🔍 [5/5] Sample of verified edges in {repo_name}:")
+        for edge in linker_out.verified_edges[:8]:
+            print(f"   • [{edge.type.value:<12}] {edge.source_id}  -->  {edge.target_id}")
+        if len(linker_out.verified_edges) > 8:
+            print(f"   ... and {len(linker_out.verified_edges) - 8} more verified edges.")
 
-        print(f"\n🎉 SUCCESS: Both agents successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 3 Graph agents (Registry Keeper, Structure Mapper, Relationship Linker) successfully processed real GitHub repository {url}!")
+
 
 
 if __name__ == "__main__":

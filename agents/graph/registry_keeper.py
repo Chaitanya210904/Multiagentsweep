@@ -371,10 +371,13 @@ class RegistryKeeper(BaseAgent):
                 )
                 continue
 
-            # Both endpoints exist: attach relationship link metadata to source node
+            # Both endpoints exist: attach relationship link metadata to source and target nodes
             edge_type = details.get("edge_type", "reference")
+            line_num = details.get("line_number")
+
+            # Outgoing edge on source
             edges = source_node.metadata.setdefault("outgoing_edges", [])
-            edge_repr = {"target_id": target_id, "type": edge_type}
+            edge_repr = {"target_id": target_id, "type": edge_type, "line_number": line_num}
             if edge_repr not in edges:
                 edges.append(edge_repr)
                 written_node, log_entry = self.write_tool.write_node(
@@ -387,6 +390,23 @@ class RegistryKeeper(BaseAgent):
                 updated_nodes[written_node.id] = written_node
                 if log_entry:
                     change_logs.append(log_entry)
+
+            # Incoming edge on target
+            in_edges = target_node.metadata.setdefault("incoming_edges", [])
+            in_repr = {"source_id": source_id, "type": edge_type, "line_number": line_num}
+            if in_repr not in in_edges:
+                in_edges.append(in_repr)
+                written_target, t_log = self.write_tool.write_node(
+                    node=target_node,
+                    details={
+                        "source": "relationship_linker",
+                        "incoming_edge_added": in_repr,
+                    },
+                )
+                updated_nodes[written_target.id] = written_target
+                if t_log:
+                    change_logs.append(t_log)
+
 
     def _process_data_service_mapper_proposals(
         self,

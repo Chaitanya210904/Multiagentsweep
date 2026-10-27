@@ -40,6 +40,28 @@ class RegistryProposeTool:
             details=details or {"action": "update_node", "name": node.name},
         )
 
+    def propose_edge(self, edge: Any, details: Optional[Dict[str, Any]] = None) -> UpdateProposal:
+        """Formulate an edge proposal linking two verified nodes for Registry Keeper."""
+        edge_details = {
+            "source_id": edge.source_id,
+            "target_id": edge.target_id,
+            "edge_type": edge.type.value if hasattr(edge.type, "value") else str(edge.type),
+            "edge_id": edge.id,
+            "line_number": edge.line_number,
+            "confidence": getattr(edge, "confidence", 1.0),
+            "metadata": getattr(edge, "metadata", {}),
+        }
+        if details:
+            edge_details.update(details)
+
+        return UpdateProposal(
+            proposal_id=str(uuid.uuid4()),
+            source_agent=self.source_agent,
+            action=ChangeAction.UPDATE,
+            node=None,
+            details=edge_details,
+        )
+
     def build_proposals(
         self,
         nodes: List[RegistryNode],
