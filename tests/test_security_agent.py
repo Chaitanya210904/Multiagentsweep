@@ -296,7 +296,7 @@ def test_end_to_end_security_audit():
         assert isinstance(out, SecurityOutput)
         assert len(out.vulnerabilities_with_severity_and_owasp_or_cve_reference) >= 3
         assert out.critical_count >= 1  # OS command injection
-        assert out.high_count >= 1      # Stripe key or root Docker
+        assert out.high_count >= 1      # Leaked API key or root Docker
         assert out.passed is False      # Fails because critical/high present
         assert out.security_grade in ("D", "F")
         assert out.security_score < 70.0
