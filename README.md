@@ -16,7 +16,8 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `code_quality` (**Code Quality: Maintainability checker**) - *Implemented*
 5. **Safety Layer**:
    - `security` (**Security: Vulnerability scanner**) - *Implemented*
-   - Company Rules, Compatibility, Validation
+   - `company_rules` (**Company Rules: Rule compliance checker**) - *Implemented*
+   - Compatibility, Validation
 6. **Runtime Layer**:
    - `observability` (**Observability: Logs, metrics and traces reader**) - *Implemented*
    - `scale_load` (**Scale & Load: Capacity analyst**) - *Implemented*
@@ -224,6 +225,40 @@ A distributed, layered multi-agent platform for automated codebase comprehension
 
 ---
 
+## Agent Specification: Company Rules (`company_rules`)
+
+| Field | Value |
+|---|---|
+| **ID** | `company_rules` |
+| **Name** | Company Rules |
+| **Layer** | `safety` |
+| **Role** | Rule compliance checker |
+| **Description** | Checks your uploaded rule files, cites the rule ID per finding, and flags violations by severity. |
+| **Access** | `read-only` (strictly prohibited from mutating registry directly) |
+| **Model Tier** | `small` |
+| **Trigger** | on changed files or rule updates |
+| **Optional** | `false` |
+
+### Inputs
+- `changed_files`: List of files to inspect for enterprise policy compliance.
+- `rule_files`: Uploaded policy documents (.md, .txt, .json, .yaml, or PDF text) containing numbered rule IDs.
+- `rule_definitions`: Pre-parsed `CompanyRuleDefinition` specifications.
+- `fail_on_severity`: Minimum severity threshold triggering failure (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`).
+
+### Outputs
+- `violations`: Pinpointed violations with exact file paths, line numbers, cited rule IDs (`RULE-SEC-001`, `RULE-ARCH-001`), offending code snippets, and remediation steps.
+- `compliance_score`: Quantitative compliance score (0.0 to 100.0).
+- `severity_breakdown`: Granular counts of critical, high, medium, low, and info violations.
+- `passed`: Pass/fail boolean flag against `fail_on_severity`.
+- `summary`: High-level executive compliance summary.
+
+### Tools
+- `rules.parse`: Parses uploaded policy documents and extracts structured company rule definitions with numbered Rule IDs, categories, severities, regex patterns, and remediations.
+- `rules.evaluate`: Evaluates codebase files against active company rules, pinpointing exact line numbers and citing rule IDs with severity and remediation.
+- `registry.lookup`: Queries canonical code nodes in the Code Registry to enrich rule infractions with code context.
+
+---
+
 ## Agent Specification: Code Quality (`code_quality`)
 
 | Field | Value |
@@ -417,6 +452,9 @@ python -m agents.graph.cli logs --limit 20
 
 # 6. Audit token expenditure and route tasks to small models
 python -m agents.graph.cli govern-tokens --budget 10.0 --aggressive
+
+# 7. Check codebase against company policy rules & cite rule IDs
+python -m agents.graph.cli check-rules --fail-on high
 ```
 
 ---

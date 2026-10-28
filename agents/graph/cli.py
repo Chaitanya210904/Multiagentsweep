@@ -19,6 +19,7 @@ from agents.understanding.impact_analyzer import ImpactAnalyzer
 from agents.quality.architecture_review import ArchitectureReview
 from agents.quality.code_quality import CodeQuality
 from agents.safety.security_agent import SecurityAgent
+from agents.safety.company_rules_agent import CompanyRulesAgent
 from agents.runtime.observability_agent import ObservabilityAgent
 from agents.runtime.scale_load_agent import ScaleLoadAgent
 from agents.runtime.tech_scout_agent import TechScoutAgent
@@ -27,6 +28,7 @@ from agents.optional.cost_token_governor_agent import CostTokenGovernorAgent
 from core.logger import AgentLogger, agent_logger
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
+from models.company_rules import CompanyRulesInput, RuleSeverity
 from models.data_service import DataServiceMapperInput, SystemEdgeType
 from models.impact import ImpactAnalyzerInput
 from models.observability import ObservabilityInput
@@ -178,6 +180,12 @@ def build_parser() -> argparse.ArgumentParser:
     gov_parser.add_argument("--budget", type=float, default=None, help="Budget ceiling in USD (e.g., 5.00)")
     gov_parser.add_argument("--aggressive", action="store_true", help="Aggressively down-route moderate tasks to small models")
     gov_parser.add_argument("--plan-file", default=None, help="Optional path to custom JSON task plan file")
+
+    # check-rules (Company Rules)
+    cr_parser = subparsers.add_parser("check-rules", parents=[common_parser], help="Company Rules: Check uploaded rule files, cite rule IDs, and flag violations")
+    cr_parser.add_argument("--files", nargs="*", default=None, help="Target files to check (default: all files in repo)")
+    cr_parser.add_argument("--policy", nargs="*", default=None, help="Path to policy or rule documents (.md, .txt, .json)")
+    cr_parser.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"], default="high", help="Minimum severity threshold to trigger failure (default: high)")
 
 
 
@@ -751,12 +759,39 @@ def main():
             for rec in rep.optimization_recommendations:
                 print(f"   • {rec}")
 
+    elif args.command == "check-rules":
+        cr_agent = CompanyRulesAgent(registry_store=store, repo_root=args.repo)
+        fail_sev = RuleSeverity(args.fail_on)
+        inp = CompanyRulesInput(
+            changed_files=args.files or [],
+            rule_files=args.policy or [],
+            fail_on_severity=fail_sev,
+            repo_root=args.repo,
+        )
+        res = cr_agent.execute(inp)
+        status_tag = "✅ PASSED" if res.passed else "❌ FAILED"
+        print(f"\n📋 Company Rules Compliance Audit: [{status_tag}]")
+        print(f"   • Compliance Score: {res.compliance_score}/100.0")
+        print(f"   • Rules Checked: {res.rules_checked_count}")
+        print(f"   • Files Scanned: {res.files_scanned_count}")
+        print(f"   • Total Violations: {len(res.violations)} (Crit: {res.critical_count}, High: {res.high_count}, Med: {res.medium_count}, Low: {res.low_count})")
+        print(f"   • Summary: {res.summary}")
+        if res.violations:
+            print(f"\n⚠️  Pinpointed Violations with Cited Rule IDs:")
+            for v in res.violations[:15]:
+                loc = f"{v.file_path}:{v.line_number}" if v.line_number else v.file_path
+                print(f"   • [{v.severity.value.upper()}] [{v.rule_id}] at {loc}")
+                print(f"     Infraction: {v.infraction_message}")
+                if v.code_snippet:
+                    print(f"     Snippet: {v.code_snippet}")
+                print(f"     Remediation: {v.remediation}")
+
     elif args.command == "test-github":
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
 
-        print(f"📦 [1/12] Preparing real GitHub repository: {url}")
+        print(f"📦 [1/15] Preparing real GitHub repository: {url}")
         if not dest_dir.exists():
             print(f"⬇️  Cloning {url} into {dest_dir} (depth={args.depth})...")
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -778,13 +813,14 @@ def main():
         target_arch = ArchitectureReview(store=target_store, repo_root=str(dest_dir))
         target_quality = CodeQuality(store=target_store, repo_root=str(dest_dir))
         target_sec = SecurityAgent(registry_store=target_store, repo_root=str(dest_dir))
+        target_rules = CompanyRulesAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_obs = ObservabilityAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scale = ScaleLoadAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_scout = TechScoutAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_testgen = TestGenerationAgent(registry_store=target_store, repo_root=str(dest_dir))
         target_gov = CostTokenGovernorAgent(log_file=dest_dir / "logs" / "agents.jsonl")
 
-        print(f"\n💰 [2/14] Cost & Token Governor budgeting workflow and routing simple checks to small models...")
+        print(f"\n💰 [2/15] Cost & Token Governor budgeting workflow and routing simple checks to small models...")
         gov_out = target_gov.execute(CostTokenGovernorInput(
             task_plan=[
                 {"step_id": "step_map", "agent_id": "structure_mapper", "task_type": "ast_scan", "complexity": "simple", "estimated_input_tokens": 2000},
@@ -795,39 +831,46 @@ def main():
             aggressive_savings=True,
         ))
 
-        print(f"\n🗺️  [3/14] Structure Mapper walking real GitHub repository...")
+        print(f"\n🗺️  [3/15] Structure Mapper walking real GitHub repository...")
         mapper_out, keeper_out = target_mapper.map_and_register(
             registry_keeper=target_keeper,
             repo_shard=".",
         )
 
-        print(f"\n🔗 [4/14] Relationship Linker analyzing and verifying code edges...")
+        print(f"\n🔗 [4/15] Relationship Linker analyzing and verifying code edges...")
         linker_out, keeper_edges_out = target_linker.link_and_register(
             registry_keeper=target_keeper,
         )
 
-        print(f"\n🌐 [5/14] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
+        print(f"\n🌐 [5/15] Data & Service Mapper mapping APIs, DB tables, queries & external services...")
         dsm_out, keeper_sys_out = target_dsm.map_and_register(
             registry_keeper=target_keeper,
         )
 
         total_system_edges = len(dsm_out.api_to_code_edges) + len(dsm_out.code_to_table_edges) + len(dsm_out.service_to_service_edges)
 
-        print(f"\n💥 [6/14] Impact Analyzer evaluating blast-radius on core repository nodes...")
+        print(f"\n💥 [6/15] Impact Analyzer evaluating blast-radius on core repository nodes...")
         sample_node = next((n.id for n in mapper_out.nodes if "router" in n.id.lower() or "app" in n.id.lower()), mapper_out.nodes[0].id)
         impact_out = target_impact.execute(ImpactAnalyzerInput(changed_nodes=[sample_node], max_depth=4))
 
-        print(f"\n🏛️  [7/14] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
+        print(f"\n🏛️  [7/15] Architecture Review evaluating layers, cycles, coupling & drafting ADRs...")
         arch_out = target_arch.execute(ArchitectureReviewInput(check_cycles=True, max_coupling_threshold=20))
 
-        print(f"\n🔍 [8/14] Code Quality inspecting complexity, duplication, smells & style...")
+        print(f"\n🔍 [8/15] Code Quality inspecting complexity, duplication, smells & style...")
         sample_files = [n.location.path for n in mapper_out.nodes if n.type == NodeType.FILE][:10]
         quality_out = target_quality.execute(CodeQualityInput(changed_files=sample_files))
 
-        print(f"\n🛡️  [9/14] Security scanning SAST, secrets, dependency CVEs & configs...")
+        print(f"\n🛡️  [9/15] Security scanning SAST, secrets, dependency CVEs & configs...")
         sec_out = target_sec.execute(SecurityInput(changed_code=sample_files))
 
-        print(f"\n📡 [10/14] Observability linking operational telemetry, metrics & traces to code nodes...")
+        print(f"\n📋 [10/15] Company Rules verifying compliance against uploaded enterprise policies & citing rule IDs...")
+        rules_out = target_rules.execute(CompanyRulesInput(
+            changed_files=sample_files,
+            fail_on_severity=RuleSeverity.HIGH,
+            repo_root=str(dest_dir),
+        ))
+
+        print(f"\n📡 [11/15] Observability linking operational telemetry, metrics & traces to code nodes...")
         obs_sample = {
             "metrics": [{"metric_name": "http_request_duration_seconds", "value": 0.12, "baseline": 0.10}],
             "logs": [],
@@ -835,20 +878,20 @@ def main():
         }
         obs_out = target_obs.execute(ObservabilityInput(opentelemetry_and_prometheus_data=obs_sample))
 
-        print(f"\n⚡ [11/14] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
+        print(f"\n⚡ [12/15] Scale & Load evaluating N+1 queries, missing indexes, caching gaps & capacity...")
         scale_out = target_scale.execute(ScaleLoadInput(
             graph_hot_paths=[sample_node],
             traffic_target=TrafficTarget(target_rps=100.0, target_p99_latency_ms=200.0),
         ))
 
-        print(f"\n🔬 [12/14] Tech Scout researching modern upgrades for identified bottlenecks...")
+        print(f"\n🔬 [13/15] Tech Scout researching modern upgrades for identified bottlenecks...")
         scout_pains = [b.title for b in scale_out.bottlenecks] or ["Throughput scaling and query latency"]
         scout_out = target_scout.execute(TechScoutInput(
             pain_points_from_other_agents=scout_pains,
             max_options=3,
         ))
 
-        print(f"\n🧪 [13/14] Test Generation synthesizing unit tests for coverage gaps (approval gate & dry-run)...")
+        print(f"\n🧪 [14/15] Test Generation synthesizing unit tests for coverage gaps (approval gate & dry-run)...")
         testgen_targets = sample_files[:2] if sample_files else []
         testgen_gaps = impact_out.affected_nodes_and_services.untested_nodes[:3] if impact_out.affected_nodes_and_services else []
         testgen_out = target_testgen.execute(TestGenerationInput(
@@ -858,7 +901,7 @@ def main():
             dry_run=True,
         ))
 
-        print(f"\n📊 [14/14] Pipeline Complete Across Graph, Understanding, Quality, Safety, Runtime & Optional Layers:")
+        print(f"\n📊 [15/15] Pipeline Complete Across Graph, Understanding, Quality, Safety, Runtime & Optional Layers:")
         print(f"   • Real source files scanned: {mapper_out.stats.get('files_scanned')}")
         print(f"   • Code nodes extracted: {len(mapper_out.nodes)}")
         print(f"   • System nodes: {len(dsm_out.api_nodes)} APIs, {len(dsm_out.table_nodes)} DB tables, {len(dsm_out.service_nodes)} services")
@@ -870,6 +913,7 @@ def main():
         print(f"   • Quality Findings Pinpointed: {len(quality_out.findings_with_file_and_line)}")
         print(f"   • Security Health Score: {sec_out.security_score}/100.0 (Grade: [{sec_out.security_grade}])")
         print(f"   • Security Vulnerabilities: {len(sec_out.vulnerabilities_with_severity_and_owasp_or_cve_reference)} (Crit: {sec_out.critical_count}, High: {sec_out.high_count})")
+        print(f"   • Company Policy Compliance: [{'PASSED' if rules_out.passed else 'FAILED'}] ({rules_out.compliance_score}/100.0, {len(rules_out.violations)} violation(s), Crit: {rules_out.critical_count})")
         print(f"   • Runtime Health Status: [{obs_out.health_status}]")
         print(f"   • Capacity Status: [{scale_out.capacity_estimate.status.value}] ({scale_out.capacity_estimate.current_max_rps:.1f} max RPS vs {scale_out.capacity_estimate.target_rps:.1f} target)")
         print(f"   • Top Tech Recommendation: {scout_out.top_recommendation or 'None'}")
@@ -877,7 +921,7 @@ def main():
         print(f"   • Token Governor Down-Routed: {gov_out.total_down_routed_steps} steps (Saved: ${gov_out.cost_report.total_estimated_savings_usd:.4f} USD)")
         print(f"   • Saved to: {storage_file}")
 
-        print(f"\n🎉 SUCCESS: All 13 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Observability, Scale & Load, Tech Scout, Test Generation, Cost & Token Governor) successfully processed real GitHub repository {url}!")
+        print(f"\n🎉 SUCCESS: All 14 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Company Rules, Observability, Scale & Load, Tech Scout, Test Generation, Cost & Token Governor) successfully processed real GitHub repository {url}!")
 
 
 
