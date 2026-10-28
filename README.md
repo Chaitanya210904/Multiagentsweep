@@ -628,7 +628,14 @@ multiagent/
 ├── tests/
 │   ├── __init__.py
 │   └── test_registry_keeper.py   # Complete test suite (12 unit & integration tests)
-└── requirements.txt
+ui/
+├── __init__.py               # UI module exports (MultiAgentUIServer, run_server)
+├── server.py                 # Zero-dependency Python standard library REST server
+└── static/
+    ├── index.html            # Dark-mode dashboard with 5 visual views
+    ├── style.css             # Glassmorphic UI design tokens & responsive styles
+    ├── app.js                # Single-page application logic, API sync, HITL modal
+    └── graph.js              # HTML5 Canvas force-directed physics graph visualizer
 ```
 
 ---
@@ -638,25 +645,28 @@ multiagent/
 The multi-agent platform can be executed directly from the terminal against any real repository:
 
 ```bash
-# 1. Orchestrate complete codebase review across all layers (with Governor & Critic)
+# 1. Launch Interactive Visual Web Dashboard & Force-Directed Graph UI
+python -m agents.graph.cli ui --port 8080
+
+# 2. Orchestrate complete codebase review across all layers (with Governor & Critic)
 python -m agents.graph.cli orchestrate --title "Full Multi-Agent Codebase Audit" --budget 10.0
 
-# 2. Run parallel multi-agent dispatch on target files
+# 3. Run parallel multi-agent dispatch on target files
 python -m agents.graph.cli orchestrate --parallel --target-files src/main.py
 
-# 3. Grant operator approval for synthesized remediations
+# 4. Grant operator approval for synthesized remediations
 python -m agents.graph.cli orchestrate --approve
 
-# 4. Check enterprise company rules & cite rule IDs
+# 5. Check enterprise company rules & cite rule IDs
 python -m agents.graph.cli check-rules --fail-on high
 
-# 5. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
+# 6. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
 python -m agents.graph.cli scan --repo .
 
-# 6. Reconcile against git diff on commit or working tree
+# 7. Reconcile against git diff on commit or working tree
 python -m agents.graph.cli sync
 
-# 7. View historical audit change logs & structured agent traces
+# 8. View historical audit change logs & structured agent traces
 python -m agents.graph.cli logs --limit 20
 ```
 
@@ -665,6 +675,6 @@ python -m agents.graph.cli logs --limit 20
 ## Running Test Suite
 
 ```bash
-# Run all 127 tests across all 18 test files
+# Run all 131 tests across all 19 test files
 PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```

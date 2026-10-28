@@ -201,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     orch_parser.add_argument("--budget", type=float, default=None, help="Cost budget ceiling in USD for token governor")
     orch_parser.add_argument("--approve", action="store_true", help="Operator approves synthesized remediations and changes")
 
+    # ui (Interactive Dashboard & Visual Graph)
+    ui_parser = subparsers.add_parser("ui", parents=[common_parser], help="Launch the interactive web dashboard & visual code graph")
+    ui_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+    ui_parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind (default: 127.0.0.1)")
+    ui_parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser on launch")
+
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
     logs_parser.add_argument("--limit", type=int, default=30, help="Number of log records to show (default: 30)")
@@ -879,6 +885,24 @@ def main():
             print(f"   Review proposals above and re-run with '--approve' to grant authorization.")
         elif args.approve:
             print(f"\n🟢 OPERATOR CONSENT GRANTED: Remediation tasks authorized for execution.")
+
+    elif args.command == "ui":
+        from ui.server import run_server
+        print(f"🌐 Launching Multi-Agent Interactive Dashboard on http://{args.host}:{args.port}...")
+        server = run_server(
+            repo_root=args.repo,
+            storage_path=args.storage,
+            port=args.port,
+            host=args.host,
+            open_browser=not args.no_browser,
+        )
+        print(f"✨ Dashboard active! Point your browser to http://{args.host}:{args.port}")
+        print(f"   (Press Ctrl+C to terminate server)")
+        try:
+            if server.httpd:
+                server.httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n🛑 Shutting down dashboard server.")
 
     elif args.command == "test-github":
         url = args.github_url
