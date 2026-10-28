@@ -1,370 +1,200 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Repository Analyzer — Multi-Agent AI Platform</title>
   <meta name="description" content="Multi-Agent AI Platform: Unified Codebase Comprehension, Verification, and Transformation Dashboard">
-  <title>Multi-Agent AI Platform | Interactive Control & Visual Graph</title>
+  
+  <!-- Modern Typography Preconnect -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-  <!-- Top Navbar -->
-  <header class="navbar">
-    <div class="nav-brand">
-      <div class="brand-icon">⚡</div>
-      <div>
-        <div class="brand-title">Multi-Agent AI Platform</div>
+  <!-- Full-bleed Aesthetic Background Container -->
+  <div class="app-background-layer" aria-hidden="true">
+    <div class="bg-image"></div>
+    <div class="bg-mesh-fallback"></div>
+    <div class="bg-grain"></div>
+    <div class="bg-wash"></div>
+  </div>
+
+  <!-- Root Application Shell -->
+  <div id="app" class="app-shell" data-state="idle">
+
+    <!-- SLIM TOP BAR (Animates down in State 2: Analysis) -->
+    <header id="topBar" class="top-bar" aria-label="Analysis navigation">
+      <div class="top-bar-left">
+        <a href="#" class="top-bar-brand" aria-label="Repository Analyzer Home">
+          <span class="brand-glyph">✦</span>
+          <span>Repository Analyzer</span>
+        </a>
+        <a id="activeRepoLink" href="#" target="_blank" rel="noopener noreferrer" class="active-repo-badge" title="Open repository in new tab">
+          <span class="repo-icon">📦</span>
+          <span id="activeRepoName">github.com/owner/repository</span>
+          <span class="external-link-icon">↗</span>
+        </a>
       </div>
-      <span class="brand-tag">CONTROL LAYER ACTIVE</span>
-    </div>
 
-    <nav class="nav-tabs" aria-label="Dashboard Navigation">
-      <button class="nav-tab-btn active" data-tab="dashboard" id="tabNavOverview">
-        <span>📊</span> Overview
-      </button>
-      <button class="nav-tab-btn" data-tab="graph" id="tabNavGraph">
-        <span>🕸️</span> Live Graph
-      </button>
-      <button class="nav-tab-btn" data-tab="pipeline" id="tabNavPipeline">
-        <span>⚡</span> Pipeline DAG
-      </button>
-      <button class="nav-tab-btn" data-tab="critic" id="tabNavCritic">
-        <span>🛡️</span> Critic & Review
-      </button>
-      <button class="nav-tab-btn" data-tab="logs" id="tabNavLogs">
-        <span>📜</span> Agent Traces
-      </button>
-    </nav>
-
-    <div class="nav-actions">
-      <button class="btn-secondary" id="btnOpenGithubModal" style="display:flex; align-items:center; gap:0.4rem;">
-        <span>📦</span> Analyze GitHub Repo
-      </button>
-      <button class="btn-primary" id="btnOpenAuditModal">
-        <span>▶</span> Trigger Audit
-      </button>
-    </div>
-  </header>
-
-  <!-- Main Container -->
-  <main class="main-container">
-
-    <!-- TAB 1: OVERVIEW -->
-    <section class="tab-pane active" id="tab-dashboard">
-      <!-- Target Repository Bar -->
-      <div class="glass-panel" style="margin-bottom: 1.5rem; padding: 1.25rem 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.04), rgba(0, 240, 255, 0.05)); border: 1px solid rgba(0, 240, 255, 0.25);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.75rem;">
-          <div style="display:flex; align-items:center; gap:0.6rem;">
-            <span style="font-size:1.25rem;">📦</span>
-            <span style="font-weight:700; font-size:1rem; color:#fff;">Target GitHub Repository</span>
-            <span class="badge badge-control" id="currentRepoBadge">multiagent</span>
-          </div>
-          <span style="font-size:0.8rem; color:#94a3b8;">Enter any public GitHub URL to clone, index & audit fresh</span>
+      <div class="top-bar-center">
+        <div id="topBarStatus" class="top-bar-status is-active" aria-live="polite">
+          Initializing analysis pipeline...
         </div>
-        <form id="topGithubForm" style="display:flex; gap:0.75rem; align-items:center;">
-          <input type="url" class="form-input" id="topGithubUrl" placeholder="https://github.com/owner/repository (e.g. https://github.com/psf/requests)" style="flex:1; padding:0.65rem 1rem; font-size:0.92rem;" required>
-          <button type="submit" class="btn-primary" id="btnTopSubmitGithub" style="white-space:nowrap; padding:0.65rem 1.4rem;">
-            <span>🚀</span> Clone & Analyze Repository
+      </div>
+
+      <div class="top-bar-right">
+        <!-- Download Registry Button & Dropdown in Top Bar -->
+        <div class="top-bar-download-group">
+          <button type="button" id="btnTopBarDownloadRegistry" class="btn-topbar-download" title="Download Code Registry extraction (JSON & CSV)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5 5 5-5m-5 5V3"/></svg>
+            <span>Download Registry</span>
+          </button>
+          <div class="topbar-download-dropdown" id="topBarDownloadDropdown" style="display:none;">
+            <button type="button" class="dropdown-item" id="btnTopBarDlCsv">
+              <span class="item-ext">.CSV</span> Functions & Call Relations (Calls, Called By, Lines)
+            </button>
+            <button type="button" class="dropdown-item" id="btnTopBarDlCallGraphCsv">
+              <span class="item-ext">.CSV</span> Call Graph Matrix (Who Calls What row-by-row)
+            </button>
+            <button type="button" class="dropdown-item" id="btnTopBarDlJson">
+              <span class="item-ext">.JSON</span> Full Code Registry & Graph (AST, Hashes, Edges)
+            </button>
+          </div>
+        </div>
+
+        <button type="button" id="streamModeToggle" class="btn-mode-toggle" title="Switch between Interactive Demo Stream and Live Backend API">
+          Mode: Demo Stream
+        </button>
+        <button type="button" id="btnThemeToggle" class="btn-theme-toggle" title="Toggle Light / Dark mode" aria-label="Toggle theme">
+          <span class="theme-icon">☀️</span>
+        </button>
+        <button type="button" id="btnNewAnalysis" class="btn-new-analysis" title="Return to Landing and analyze another repository">
+          <span>←</span> New Analysis
+        </button>
+      </div>
+
+      <!-- Thin Overall Progress Bar along top bar border -->
+      <div class="top-bar-progress-track">
+        <div id="analysisProgressBar" class="top-bar-progress-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+    </header>
+
+    <!-- ====================================================================
+         STATE 1: MINIMAL LANDING VIEW (Default on open)
+         Shows ONLY centered input, "Analyze Repository" button, wordmark, tagline.
+         Nothing else: no sidebar, no navbar, no stats, no cards, no widgets.
+         ==================================================================== -->
+    <main id="landingView" class="landing-view" aria-label="Repository submission">
+      <div class="landing-card">
+        
+        <!-- Refined Editorial Wordmark & Tagline -->
+        <h1 class="landing-wordmark">
+          <span class="wordmark-glyph">✦</span> Repository Analyzer
+        </h1>
+        <p class="landing-tagline">
+          Multi-Agent AI Platform for autonomous codebase comprehension, architecture mapping, and security verification.
+        </p>
+
+        <!-- Centered Input Form -->
+        <form id="landingForm" class="landing-form" novalidate>
+          <div class="repo-input-wrapper">
+            <span class="repo-input-icon" aria-hidden="true">☊</span>
+            <input 
+              type="text" 
+              id="repoUrlInput" 
+              class="repo-input-field" 
+              placeholder="Paste a GitHub repository link…" 
+              autocomplete="off" 
+              spellcheck="false"
+              aria-label="Repository URL"
+              aria-describedby="inputError"
+              autofocus
+            >
+          </div>
+
+          <!-- Gentle Inline Error Message -->
+          <div id="inputError" class="repo-input-error" role="alert" aria-live="polite"></div>
+
+          <!-- Primary Submit Button -->
+          <button type="submit" id="btnAnalyze" class="btn-analyze-primary" disabled>
+            <span>Analyze Repository</span>
+            <span aria-hidden="true">→</span>
           </button>
         </form>
-        <div id="topGithubStatus" style="display:none; margin-top:0.75rem; padding:0.65rem 0.85rem; border-radius:6px; font-size:0.82rem; font-family:var(--font-mono); line-height:1.5;"></div>
+
+        <!-- Curated Public Sample Chips -->
+        <div id="quickChipsContainer" class="quick-chips-wrapper"></div>
       </div>
+    </main>
 
-      <!-- Metric Strip -->
-      <div class="metric-grid">
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">Tracked Entities</span>
-            <span class="metric-icon">📦</span>
-          </div>
-          <div class="metric-value" id="metricTotalNodes">--</div>
-          <div class="metric-sub">Across files, classes & functions</div>
+    <!-- ====================================================================
+         STATE 2: ANALYSIS WORKSPACE (Fades/slides in after submission)
+         5 Real-time panels in responsive editorial grid:
+         1. Pipeline DAG
+         2. Live Graph
+         3. Agents Feed & Traces
+         4. Critic Review & Findings
+         5. Final Summary
+         ==================================================================== -->
+    <main id="analysisView" class="analysis-view" aria-label="Analysis workspace">
+      <div class="analysis-grid">
+
+        <!-- Left Column: Architecture & Structure Flow -->
+        <div class="grid-col">
+          
+          <!-- PANEL 1: Pipeline DAG -->
+          <section id="panelPipelineDAG" class="panel-card" aria-label="Analysis pipeline directed acyclic graph"></section>
+
+          <!-- PANEL 2: Live Graph -->
+          <section id="panelLiveGraph" class="panel-card" aria-label="Live interactive repository code graph"></section>
+
         </div>
 
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">Source Files</span>
-            <span class="metric-icon">📄</span>
-          </div>
-          <div class="metric-value" id="metricFilesCount">--</div>
-          <div class="metric-sub">AST indexed in Code Registry</div>
+        <!-- Right Column: Verification, Intelligence & Summary -->
+        <div class="grid-col">
+
+          <!-- PANEL 5: Final Summary -->
+          <section id="panelSummary" class="panel-card" aria-label="Executive summary and audit score"></section>
+
+          <!-- PANEL 4: Critic Review -->
+          <section id="panelCriticReview" class="panel-card" aria-label="Critic findings and code remediation"></section>
+
+          <!-- PANEL 3: Agents Panel & Traces -->
+          <section id="panelAgentFeed" class="panel-card" aria-label="Live autonomous agents activity feed"></section>
+
         </div>
 
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">APIs & DB Tables</span>
-            <span class="metric-icon">🔌</span>
-          </div>
-          <div class="metric-value">
-            <span id="metricApisCount">--</span> / <span id="metricDbsCount">--</span>
-          </div>
-          <div class="metric-sub">Discovered endpoints & schemas</div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">Platform Agents</span>
-            <span class="metric-icon">🤖</span>
-          </div>
-          <div class="metric-value" id="metricAgentsCount">16</div>
-          <div class="metric-sub">Across 7 autonomous layers</div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">False Alarms Pruned</span>
-            <span class="metric-icon">🧹</span>
-          </div>
-          <div class="metric-value" id="metricPrunedCount" style="color:var(--layer-control)">--</div>
-          <div class="metric-sub">Duplicates & non-existent files</div>
-        </div>
-
-        <div class="metric-card">
-          <div class="metric-header">
-            <span class="metric-title">Active Findings</span>
-            <span class="metric-icon">⚠️</span>
-          </div>
-          <div class="metric-value" id="metricActiveFindings" style="color:#f59e0b">--</div>
-          <div class="metric-sub">Verified actionable items</div>
-        </div>
       </div>
+    </main>
 
-      <!-- Hero Section with Radial Health Gauge & Executive Summary -->
-      <div class="dashboard-hero">
-        <div class="health-scorecard">
-          <span class="panel-title">System Health Score</span>
-          <div class="score-dial">
-            <svg viewBox="0 0 160 160">
-              <circle class="dial-track" cx="80" cy="80" r="65"></circle>
-              <circle class="dial-progress" id="dialProgress" cx="80" cy="80" r="65" stroke-dasharray="408.4" stroke-dashoffset="100"></circle>
-            </svg>
-            <div class="score-dial-inner">
-              <span class="dial-number" id="dialHealthScore">--</span>
-              <span class="dial-label">Score / 100</span>
-            </div>
-          </div>
-
-          <div class="domain-bars" id="domainBarsContainer">
-            <!-- Populated dynamically via JS -->
-          </div>
-        </div>
-
-        <div class="hero-right">
-          <div class="glass-panel">
-            <div class="panel-header">
-              <span class="panel-title"><span>🛡️</span> Executive Critic Synthesis</span>
-              <div style="display:flex; gap:0.5rem;">
-                <span class="badge badge-critical">Crit: <span id="countCrit">0</span></span>
-                <span class="badge badge-high">High: <span id="countHigh">0</span></span>
-                <span class="badge badge-medium">Med: <span id="countMed">0</span></span>
-                <span class="badge badge-info">Info: <span id="countInfo">0</span></span>
-              </div>
-            </div>
-            <p class="exec-text" id="execSummaryText">
-              Initiate an orchestration review to generate real-time multi-agent findings, false-alarm pruning analysis, and composite impact rankings.
-            </p>
-          </div>
-
-          <div class="glass-panel">
-            <div class="panel-header">
-              <span class="panel-title"><span>🤖</span> Autonomous Agents Registry (16 Agents across 7 Layers)</span>
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:1rem;" id="agentsDirectoryGrid">
-              <!-- Populated dynamically via JS -->
-            </div>
-          </div>
+    <!-- Error State Overlay -->
+    <div id="errorView" class="error-view" aria-live="assertive">
+      <div class="error-card">
+        <span class="error-icon">⚠️</span>
+        <h3 class="error-title">Analysis Failed</h3>
+        <p id="errorMessageText" class="error-message">Unable to clone or parse the requested repository.</p>
+        <div class="error-actions">
+          <button type="button" id="btnRetryAnalysis" class="btn-analyze-primary" style="width:auto; padding:0.65rem 1.4rem;">
+            Retry Analysis
+          </button>
+          <button type="button" id="btnErrorReturn" class="btn-new-analysis">
+            Change Repository
+          </button>
         </div>
       </div>
-    </section>
-
-    <!-- TAB 2: LIVE CODE GRAPH -->
-    <section class="tab-pane" id="tab-graph">
-      <div class="glass-panel" style="padding:1rem; margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center;">
-        <div style="display:flex; align-items:center; gap:1rem;">
-          <strong style="color:#fff; font-size:1.1rem;">Interactive Codebase Topology</strong>
-          <span class="badge badge-control" id="renderedNodesCount">-- nodes rendered</span>
-        </div>
-        <div style="display:flex; gap:0.75rem; align-items:center;">
-          <input type="text" class="form-input" style="width:260px; padding:0.4rem 0.8rem;" id="graphSearchInput" placeholder="Filter node name or path...">
-        </div>
-      </div>
-
-      <div class="graph-container">
-        <canvas id="graphCanvas"></canvas>
-        <div class="node-tooltip" id="nodeTooltip"></div>
-
-        <div class="graph-legend">
-          <strong style="color:#fff; margin-bottom:2px;">Entity Taxonomy</strong>
-          <div class="legend-item"><span class="legend-dot" style="background:#00f0ff;"></span> File</div>
-          <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> API Endpoint</div>
-          <div class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span> Database Table</div>
-          <div class="legend-item"><span class="legend-dot" style="background:#a855f7;"></span> Class</div>
-          <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> Function</div>
-        </div>
-
-        <div class="graph-controls">
-          <button class="graph-btn" id="btnGraphZoomIn" title="Zoom In">+</button>
-          <button class="graph-btn" id="btnGraphZoomOut" title="Zoom Out">−</button>
-          <button class="graph-btn" id="btnGraphReset" title="Reset View">↺</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: PIPELINE DAG -->
-    <section class="tab-pane" id="tab-pipeline">
-      <div class="glass-panel">
-        <div class="panel-header">
-          <span class="panel-title"><span>⚡</span> Orchestration Subtask Execution DAG</span>
-          <span class="badge badge-control">11 Orchestrated Subtasks</span>
-        </div>
-        <div class="subtasks-list" id="pipelineSubtasksList">
-          <!-- Populated dynamically via JS -->
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 4: CRITIC & REMEDIATIONS -->
-    <section class="tab-pane" id="tab-critic">
-      <!-- Human in the Loop Gate Banner -->
-      <div class="gate-banner">
-        <div class="gate-text">
-          <h3><span>🛑</span> Human-in-the-Loop Safety Gate Active</h3>
-          <p>All automated codebase edits and test-generation disk writes are halted pending explicit operator review & approval.</p>
-        </div>
-        <span class="badge badge-critical" style="font-size:0.85rem; padding:0.4rem 1rem;">STATUS: AWAITING APPROVAL</span>
-      </div>
-
-      <!-- Synthesized Remediation Proposals -->
-      <div class="glass-panel" style="margin-bottom:2rem;">
-        <div class="panel-header">
-          <span class="panel-title"><span>💡</span> Synthesized Remediation Proposals (Actionable Options)</span>
-          <span class="badge badge-control">Human Operator Review</span>
-        </div>
-        <div id="remediationContainer">
-          <!-- Populated dynamically via JS -->
-        </div>
-      </div>
-
-      <!-- Top Impact-Ranked Active Findings -->
-      <div class="glass-panel" style="margin-bottom:2rem;">
-        <div class="panel-header">
-          <span class="panel-title"><span>🏆</span> Top Impact-Ranked Verified Findings</span>
-          <span style="font-size:0.8rem; color:#94a3b8;">Impact = (Severity &times; 0.4) + (Blast Radius &times; 0.3) + (Conf &times; 30)</span>
-        </div>
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Severity</th>
-                <th>Impact</th>
-                <th>Title / Issue</th>
-                <th>Location</th>
-                <th>Agent</th>
-                <th>Remediation Proposal</th>
-              </tr>
-            </thead>
-            <tbody id="findingsTableBody">
-              <!-- Populated dynamically via JS -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Pruned False Alarms List -->
-      <div class="glass-panel">
-        <div class="panel-header">
-          <span class="panel-title"><span>🧹</span> Pruned False Alarms & Overlapping Duplicates</span>
-          <span class="badge badge-info">Filtered by Critic</span>
-        </div>
-        <div id="prunedFindingsList">
-          <!-- Populated dynamically via JS -->
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 5: AGENT LOGS -->
-    <section class="tab-pane" id="tab-logs">
-      <div class="glass-panel">
-        <div class="panel-header">
-          <span class="panel-title"><span>📜</span> Live Agent Event Stream (Structured JSONL Traces)</span>
-          <span class="badge badge-control">Auto-Refreshing</span>
-        </div>
-        <div id="logsContainer" style="background:#05070d; border-radius:12px; padding:1rem; max-height:600px; overflow-y:auto; border:1px solid rgba(255,255,255,0.06);">
-          <!-- Populated dynamically via JS -->
-        </div>
-      </div>
-    </section>
-
-  </main>
-
-  <!-- Trigger Audit Modal -->
-  <div class="modal-overlay" id="auditModal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 style="color:#fff; font-size:1.15rem; font-weight:700;">Launch Multi-Agent Orchestration</h3>
-        <button class="btn-dismiss" id="btnCloseAuditModal" style="font-size:1.2rem; padding:0.2rem 0.6rem;">✕</button>
-      </div>
-      <form id="auditForm">
-        <div class="form-group">
-          <label for="auditTitle">Task Title / Intent</label>
-          <input type="text" class="form-input" id="auditTitle" value="Full Codebase Security and Health Audit" required>
-        </div>
-
-        <div class="form-group">
-          <label for="auditBudget">Cost / Token Budget Ceiling (USD)</label>
-          <input type="number" step="0.5" class="form-input" id="auditBudget" value="10.0" placeholder="e.g. 10.00">
-        </div>
-
-        <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
-          <input type="checkbox" id="auditParallel" style="cursor:pointer;" checked>
-          <label for="auditParallel" style="margin:0; cursor:pointer;">Execute independent subtasks concurrently (Parallel Mode)</label>
-        </div>
-
-        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
-          <button type="button" class="btn-secondary" onclick="document.getElementById('auditModal').style.display='none'">Cancel</button>
-          <button type="submit" class="btn-primary" id="btnSubmitAudit">Launch Orchestration</button>
-        </div>
-      </form>
     </div>
+
   </div>
 
-  <!-- Analyze GitHub Repo Modal -->
-  <div class="modal-overlay" id="githubModal">
-    <div class="modal-content" style="max-width:540px;">
-      <div class="modal-header">
-        <h3 style="color:#fff; font-size:1.15rem; font-weight:700;">📦 Clone & Analyze GitHub Repository</h3>
-        <button class="btn-dismiss" id="btnCloseGithubModal" style="font-size:1.2rem; padding:0.2rem 0.6rem;">✕</button>
-      </div>
-      <form id="githubForm">
-        <div class="form-group">
-          <label for="githubUrl">GitHub Repository URL</label>
-          <input type="url" class="form-input" id="githubUrl" placeholder="https://github.com/psf/requests or https://github.com/bottlepy/bottle" required>
-          <div style="font-size:0.75rem; color:#64748b; margin-top:0.35rem;">Any public Git repository URL. Automatically cloned, indexed, and audited across all 16 agents.</div>
-        </div>
+  <!-- Toast Container -->
+  <div id="appToast" class="app-toast" role="status" aria-live="polite"></div>
 
-        <div class="form-group">
-          <label for="githubDepth">Git Clone Depth</label>
-          <input type="number" min="1" max="100" class="form-input" id="githubDepth" value="1">
-          <div style="font-size:0.75rem; color:#64748b; margin-top:0.35rem;">Shallow clone depth (default 1 for rapid analysis).</div>
-        </div>
-
-        <div class="form-group" style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
-          <input type="checkbox" id="githubRunAudit" style="cursor:pointer;" checked>
-          <label for="githubRunAudit" style="margin:0; cursor:pointer;">Run full multi-agent audit (Quality, Security, Architecture, Critic) immediately</label>
-        </div>
-
-        <div id="githubStatusMsg" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; font-size:0.82rem; font-family:var(--font-mono); line-height:1.5;"></div>
-
-        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
-          <button type="button" class="btn-secondary" id="btnCancelGithub">Cancel</button>
-          <button type="submit" class="btn-primary" id="btnSubmitGithub">Clone & Analyze</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <script src="/graph.js"></script>
-  <script src="/app.js"></script>
+  <!-- Application Orchestrator Script -->
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

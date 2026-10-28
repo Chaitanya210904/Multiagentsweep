@@ -1,593 +1,626 @@
 /**
- * Multi-Agent Visual Dashboard Application Logic.
- * Handles state synchronization, REST API integration, tab navigation,
- * orchestrator execution, critic report visualization, and human-in-the-loop approvals.
+ * Main Application Orchestrator for Repository Analyzer.
+ * Governs the 2-state single-page experience:
+ * State 1 (Landing) <---> State 2 (Analysis Workspace)
+ * Coordinates the State Machine, Stream Service, and UI Components.
  */
 
-class DashboardApp {
+import { StateMachine, AppState } from './state.js';
+import { AnalysisStreamService } from './stream.js';
+import { RepoInput } from './components/RepoInput.js';
+import { LiveGraph } from './components/LiveGraph.js';
+import { PipelineDAG } from './components/PipelineDAG.js';
+import { AgentFeed } from './components/AgentFeed.js';
+import { CriticReview } from './components/CriticReview.js';
+import { SummaryPanel } from './components/SummaryPanel.js';
+
+class RepositoryAnalyzerApp {
   constructor() {
-    this.graph = null;
-    this.statusData = null;
-    this.reportData = null;
-    this.activeTab = 'dashboard';
-    this.pollingTimer = null;
+    this.stateMachine = new StateMachine();
+    this.streamService = new AnalysisStreamService();
+    this.components = {};
+    this.streamMode = 'mock'; // default to standalone demo mock stream
 
     this.init();
   }
 
   async init() {
-    this.bindNavigation();
-    this.bindAuditModal();
-    this.bindGithubModal();
+    this.bindDomElements();
+    this.bindTheme();
+    this.initComponents();
+    this.bindStateTransitions();
+    this.bindTopBarEvents();
+    this.bindCollapsiblePanels();
+    this.bindKeyboardShortcuts();
 
-    // Initialize graph engine
-    const canvas = document.getElementById('graphCanvas');
-    if (canvas) {
-      this.graph = new InteractiveCodeGraph('graphCanvas', 'nodeTooltip');
-      this.bindGraphControls();
-    }
-
-    // Initial data load
-    await this.refreshAll();
-
-    // Start background heartbeat
-    this.pollingTimer = setInterval(() => this.pollHeartbeat(), 8000);
+    // Check if backend is alive
+    this.checkBackendHealth();
   }
 
-  // ---------------- Navigation & Tab Switching ----------------
-  bindNavigation() {
-    const tabs = document.querySelectorAll('.nav-tab-btn');
-    tabs.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const target = btn.dataset.tab;
-        this.switchTab(target);
+  bindDomElements() {
+    this.dom = {
+      app: document.getElementById('app'),
+      topBar: document.getElementById('topBar'),
+      landingView: document.getElementById('landingView'),
+      analysisView: document.getElementById('analysisView'),
+      errorView: document.getElementById('errorView'),
+      progressBar: document.getElementById('analysisProgressBar'),
+      activeRepoName: document.getElementById('activeRepoName'),
+      activeRepoLink: document.getElementById('activeRepoLink'),
+      topBarStatus: document.getElementById('topBarStatus'),
+      btnNewAnalysis: document.getElementById('btnNewAnalysis'),
+      btnThemeToggle: document.getElementById('btnThemeToggle'),
+      streamModeToggle: document.getElementById('streamModeToggle'),
+      btnRetryAnalysis: document.getElementById('btnRetryAnalysis'),
+      btnErrorReturn: document.getElementById('btnErrorReturn'),
+      errorMessageText: document.getElementById('errorMessageText'),
+      btnTopBarDownloadRegistry: document.getElementById('btnTopBarDownloadRegistry'),
+      topBarDownloadDropdown: document.getElementById('topBarDownloadDropdown'),
+      btnTopBarDlJson: document.getElementById('btnTopBarDlJson'),
+      btnTopBarDlCsv: document.getElementById('btnTopBarDlCsv'),
+      btnTopBarDlCallGraphCsv: document.getElementById('btnTopBarDlCallGraphCsv'),
+    };
+    this.isBackendAlive = false;
+  }
+
+  bindTheme() {
+    document.documentElement.setAttribute('data-theme', this.stateMachine.theme);
+
+    if (this.dom.btnThemeToggle) {
+      this.dom.btnThemeToggle.addEventListener('click', () => {
+        const next = this.stateMachine.toggleTheme();
+        this.updateThemeButton(next);
       });
-    });
-  }
-
-  switchTab(tabId) {
-    this.activeTab = tabId;
-
-    document.querySelectorAll('.nav-tab-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === tabId);
-    });
-
-    document.querySelectorAll('.tab-pane').forEach(p => {
-      p.classList.toggle('active', p.id === `tab-${tabId}`);
-    });
-
-    if (tabId === 'graph' && this.graph) {
-      setTimeout(() => {
-        this.graph.initCanvasSize();
-        this.graph.render();
-      }, 50);
-    } else if (tabId === 'logs') {
-      this.fetchLogs();
-    }
-  }
-
-  // ---------------- API Integration ----------------
-  async refreshAll() {
-    await Promise.all([
-      this.fetchStatus(),
-      this.fetchReport(),
-      this.fetchGraph(),
-    ]);
-  }
-
-  async fetchStatus() {
-    try {
-      const res = await fetch('/api/status');
-      const data = await res.json();
-      this.statusData = data;
-      this.renderStatus(data);
-      this.renderAgentsList(data.agents || []);
-    } catch (e) {
-      console.error('Failed to fetch status:', e);
-    }
-  }
-
-  async fetchReport() {
-    try {
-      const res = await fetch('/api/report');
-      const data = await res.json();
-      if (data && data.unified_report) {
-        this.reportData = data;
-        this.renderReport(data.unified_report, data.subtasks || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch report:', e);
-    }
-  }
-
-  async fetchGraph() {
-    try {
-      const res = await fetch('/api/graph?limit=500');
-      const data = await res.json();
-      if (this.graph) {
-        this.graph.setData(data);
-        const countEl = document.getElementById('renderedNodesCount');
-        if (countEl) countEl.innerText = `${data.rendered_nodes_count} / ${data.total_nodes_in_registry}`;
-      }
-    } catch (e) {
-      console.error('Failed to fetch graph data:', e);
-    }
-  }
-
-  async fetchLogs() {
-    try {
-      const res = await fetch('/api/logs?limit=50');
-      const data = await res.json();
-      this.renderLogs(data.logs || []);
-    } catch (e) {
-      console.error('Failed to fetch logs:', e);
-    }
-  }
-
-  async pollHeartbeat() {
-    if (this.activeTab === 'logs') {
-      await this.fetchLogs();
-    }
-  }
-
-  renderStatus(data) {
-    const repoBadge = document.getElementById('currentRepoBadge');
-    if (repoBadge) repoBadge.innerText = data.repo_name || 'multiagent';
-
-    const totalNodesEl = document.getElementById('metricTotalNodes');
-    if (totalNodesEl) totalNodesEl.innerText = data.total_nodes.toLocaleString();
-
-    const filesCountEl = document.getElementById('metricFilesCount');
-    if (filesCountEl) filesCountEl.innerText = (data.type_counts.file || 0).toLocaleString();
-
-    const apisCountEl = document.getElementById('metricApisCount');
-    if (apisCountEl) apisCountEl.innerText = (data.type_counts.api || 0).toLocaleString();
-
-    const dbsCountEl = document.getElementById('metricDbsCount');
-    if (dbsCountEl) dbsCountEl.innerText = (data.type_counts.table || 0).toLocaleString();
-
-    const agentsCountEl = document.getElementById('metricAgentsCount');
-    if (agentsCountEl) agentsCountEl.innerText = data.total_agents;
-
-    // Latest run summary metrics
-    if (data.latest_run) {
-      const lr = data.latest_run;
-      const prunedEl = document.getElementById('metricPrunedCount');
-      if (prunedEl) prunedEl.innerText = lr.false_alarms_pruned;
-
-      const activeEl = document.getElementById('metricActiveFindings');
-      if (activeEl) activeEl.innerText = lr.active_findings_count;
-
-      this.updateDial(lr.overall_health_score);
-    }
-  }
-
-  updateDial(score) {
-    const dialNum = document.getElementById('dialHealthScore');
-    const dialProg = document.getElementById('dialProgress');
-    if (!dialNum || !dialProg) return;
-
-    const rounded = Math.round(score);
-    dialNum.innerText = rounded;
-
-    // SVG circumference for r=65 is ~408.4
-    const circ = 408.4;
-    const offset = circ - (circ * (score / 100));
-    dialProg.style.strokeDashoffset = offset;
-
-    // Color based on health tier
-    if (score >= 85) {
-      dialProg.style.stroke = '#10b981'; // Green
-    } else if (score >= 65) {
-      dialProg.style.stroke = '#f59e0b'; // Amber
-    } else {
-      dialProg.style.stroke = '#ef4444'; // Red
-    }
-  }
-
-  renderReport(report, subtasks) {
-    this.updateDial(report.overall_health_score);
-
-    // Executive summary text
-    const execTextEl = document.getElementById('execSummaryText');
-    if (execTextEl) execTextEl.innerText = report.executive_summary;
-
-    // Severity badges
-    const critEl = document.getElementById('countCrit');
-    if (critEl) critEl.innerText = report.critical_count;
-    const highEl = document.getElementById('countHigh');
-    if (highEl) highEl.innerText = report.high_count;
-    const medEl = document.getElementById('countMed');
-    if (medEl) medEl.innerText = report.medium_count;
-    const infoEl = document.getElementById('countInfo');
-    if (infoEl) infoEl.innerText = report.info_count;
-
-    // Domain breakdown bars
-    this.renderDomainBars(report.agent_health_scores || {});
-
-    // Top impact-ranked findings table
-    this.renderRankedFindings(report.ranked_findings || []);
-
-    // Pruned false alarms list
-    this.renderPrunedFindings(report.pruned_findings || []);
-
-    // Remediation options (Human-in-the-Loop)
-    this.renderRemediations(report.remediation_options || []);
-
-    // Subtask DAG list
-    this.renderSubtasks(subtasks);
-  }
-
-  renderDomainBars(scores) {
-    const container = document.getElementById('domainBarsContainer');
-    if (!container) return;
-
-    const domains = [
-      { key: 'security', label: 'Security & Auth', color: '#ef4444' },
-      { key: 'quality', label: 'Code Quality & Tech Debt', color: '#f59e0b' },
-      { key: 'architecture', label: 'Architecture Decoupling', color: '#a855f7' },
-      { key: 'policy_compliance', label: 'Company Policy Compliance', color: '#10b981' },
-      { key: 'runtime', label: 'Runtime & Scale SLA', color: '#3b82f6' },
-    ];
-
-    container.innerHTML = domains.map(d => {
-      const val = Math.round(scores[d.key] || 100.0);
-      return `
-        <div class="domain-bar-item">
-          <div class="domain-bar-header">
-            <span style="color:#cbd5e1">${d.label}</span>
-            <span style="color:#fff; font-weight:600">${val}%</span>
-          </div>
-          <div class="domain-bar-track">
-            <div class="domain-bar-fill" style="width: ${val}%; background: ${d.color};"></div>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  renderRankedFindings(findings) {
-    const tbody = document.getElementById('findingsTableBody');
-    if (!tbody) return;
-
-    if (findings.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem; color:#64748b;">No active findings! Codebase is in pristine health.</td></tr>`;
-      return;
+      this.updateThemeButton(this.stateMachine.theme);
     }
 
-    tbody.innerHTML = findings.slice(0, 50).map(f => {
-      const sevClass = `badge-${(f.severity || 'medium').toLowerCase()}`;
-      const loc = f.file_path ? `<span class="code-loc">${f.file_path}${f.line_number ? `:${f.line_number}` : ''}</span>` : 'N/A';
-      return `
-        <tr>
-          <td><span class="badge ${sevClass}">${(f.severity || 'MEDIUM').toUpperCase()}</span></td>
-          <td><strong style="color:#fff; font-size:0.875rem;">${f.impact_score.toFixed(1)}</strong></td>
-          <td>
-            <div style="font-weight:600; color:#fff;">${f.title}</div>
-            <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">${f.description || ''}</div>
-          </td>
-          <td>${loc}</td>
-          <td><span class="badge badge-control">${f.source_agent}</span></td>
-          <td style="font-size:0.8rem; color:#cbd5e1;">${f.remediation_proposal || ''}</td>
-        </tr>
-      `;
-    }).join('');
-  }
-
-  renderPrunedFindings(pruned) {
-    const list = document.getElementById('prunedFindingsList');
-    if (!list) return;
-
-    if (pruned.length === 0) {
-      list.innerHTML = `<div style="color:#64748b; font-size:0.85rem; padding:1rem;">No false alarms or duplicates pruned in this run.</div>`;
-      return;
-    }
-
-    list.innerHTML = pruned.slice(0, 20).map(p => `
-      <div style="padding:0.75rem; border-bottom:1px solid rgba(255,255,255,0.04); display:flex; align-items:center; justify-content:space-between;">
-        <div>
-          <span style="font-size:0.85rem; font-weight:600; color:#cbd5e1;">${p.title}</span>
-          <span class="badge badge-info" style="margin-left:0.5rem;">${p.source_agent}</span>
-          <div style="font-size:0.75rem; color:#64748b; margin-top:2px;">Reason: ${p.suppression_reason || 'Duplicate / non-existent'}</div>
-        </div>
-        <span class="badge" style="background:rgba(239,68,68,0.1); color:#fca5a5;">PRUNED</span>
-      </div>
-    `).join('');
-  }
-
-  renderRemediations(options) {
-    const container = document.getElementById('remediationContainer');
-    if (!container) return;
-
-    if (options.length === 0) {
-      container.innerHTML = `<div style="text-align:center; color:#64748b; padding:2rem;">No open remediation proposals requiring approval.</div>`;
-      return;
-    }
-
-    container.innerHTML = options.map(opt => `
-      <div class="remediation-card" id="card-${opt.option_id}">
-        <div class="rem-header">
-          <div>
-            <span class="badge badge-control" style="font-family:var(--font-mono);">${opt.option_id}</span>
-            <strong style="color:#fff; font-size:0.95rem; margin-left:0.5rem;">${opt.title}</strong>
-          </div>
-          <span class="badge badge-${opt.severity ? opt.severity.toLowerCase() : 'critical'}">${opt.severity || 'CRITICAL'}</span>
-        </div>
-        <div style="font-size:0.8rem; color:#94a3b8;">
-          Target: <span class="code-loc">${opt.target_file}${opt.line_number ? `:${opt.line_number}` : ''}</span>
-          <span style="margin-left:1rem;">Impact Score: <strong style="color:#00f0ff">${opt.impact_score || 80.0}</strong></span>
-        </div>
-        <div class="rem-action">Proposed Action: ${opt.action}</div>
-        <div class="rem-footer">
-          <button class="btn-dismiss" onclick="app.decideRemediation('${opt.option_id}', 'REJECT')">Dismiss</button>
-          <button class="btn-approve" onclick="app.decideRemediation('${opt.option_id}', 'APPROVE')">✓ Approve Remediation</button>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  async decideRemediation(optionId, decision) {
-    try {
-      const res = await fetch('/api/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ option_id: optionId, decision }),
-      });
-      const data = await res.json();
-
-      const card = document.getElementById(`card-${optionId}`);
-      if (card) {
-        card.style.opacity = '0.5';
-        card.innerHTML = `
-          <div style="padding:1rem; text-align:center; color:${decision === 'APPROVE' ? '#10b981' : '#ef4444'}; font-weight:600;">
-            ${decision === 'APPROVE' ? '✓ Operator Approval Granted' : '✕ Proposal Dismissed'} (${optionId})
-          </div>
-        `;
-      }
-    } catch (e) {
-      alert(`Failed to record decision: ${e}`);
-    }
-  }
-
-  renderSubtasks(subtasks) {
-    const list = document.getElementById('pipelineSubtasksList');
-    if (!list) return;
-
-    list.innerHTML = subtasks.map(st => {
-      const isDone = st.status === 'completed';
-      const icon = isDone ? '✓' : (st.status === 'running' ? '⏳' : '○');
-      const cls = isDone ? 'status-completed' : (st.status === 'running' ? 'status-running' : 'status-pending');
-      const dur = st.duration_ms ? `${st.duration_ms.toFixed(1)}ms` : '';
-      return `
-        <div class="subtask-item">
-          <div class="subtask-left">
-            <div class="subtask-status-icon ${cls}">${icon}</div>
-            <div class="subtask-info">
-              <h4>${st.description}</h4>
-              <p>Subtask: <span style="font-family:var(--font-mono); color:var(--layer-control)">${st.subtask_id}</span> | Agent: <strong style="color:#fff">${st.agent_id}</strong> (${st.layer})</p>
-            </div>
-          </div>
-          <div style="font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">${dur}</div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  renderAgentsList(agents) {
-    const container = document.getElementById('agentsDirectoryGrid');
-    if (!container) return;
-
-    container.innerHTML = agents.map(a => `
-      <div class="metric-card" style="padding:1rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-          <strong style="color:#fff; font-size:0.9rem;">${a.name}</strong>
-          <span class="badge badge-${a.layer}">${a.layer.toUpperCase()}</span>
-        </div>
-        <div style="font-size:0.75rem; color:#94a3b8; line-height:1.4;">${a.description}</div>
-        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#64748b; margin-top:0.75rem; border-top:1px solid rgba(255,255,255,0.05); padding-top:0.5rem;">
-          <span>Tier: <strong style="color:#cbd5e1">${a.model_tier.toUpperCase()}</strong></span>
-          <span>Access: <strong style="color:#cbd5e1">${a.access}</strong></span>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  renderLogs(logs) {
-    const container = document.getElementById('logsContainer');
-    if (!container) return;
-
-    container.innerHTML = logs.map(l => {
-      const timeStr = l.timestamp ? new Date(l.timestamp * 1000).toLocaleTimeString() : '';
-      const levelColor = l.level === 'ERROR' ? '#ef4444' : (l.level === 'WARNING' ? '#f59e0b' : '#10b981');
-      return `
-        <div style="font-family:var(--font-mono); font-size:0.75rem; padding:0.35rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.03); display:flex; gap:0.75rem;">
-          <span style="color:#64748b;">${timeStr}</span>
-          <span style="color:${levelColor}; font-weight:600;">[${l.level || 'INFO'}]</span>
-          <span style="color:#00f0ff;">[${l.layer || ''}.${l.agent_id || ''}]</span>
-          <span style="color:#e2e8f0;">${l.message || l.event || ''}</span>
-        </div>
-      `;
-    }).join('');
-  }
-
-  // ---------------- Audit Modal ----------------
-  bindAuditModal() {
-    const modal = document.getElementById('auditModal');
-    const openBtn = document.getElementById('btnOpenAuditModal');
-    const closeBtn = document.getElementById('btnCloseAuditModal');
-    const form = document.getElementById('auditForm');
-
-    if (openBtn) openBtn.addEventListener('click', () => { modal.style.display = 'flex'; });
-    if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
-
-    if (form) {
-      form.addEventListener('submit', async e => {
-        e.preventDefault();
-        const title = document.getElementById('auditTitle').value;
-        const budget = parseFloat(document.getElementById('auditBudget').value) || null;
-        const parallel = document.getElementById('auditParallel').checked;
-
-        const triggerBtn = document.getElementById('btnSubmitAudit');
-        triggerBtn.disabled = true;
-        triggerBtn.innerText = '⏳ Executing Pipeline...';
-
-        try {
-          const res = await fetch('/api/orchestrate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_title: title, budget_limit_usd: budget, parallel }),
-          });
-          const data = await res.json();
-          modal.style.display = 'none';
-          await this.refreshAll();
-          this.switchTab('critic');
-        } catch (err) {
-          alert(`Orchestration failed: ${err}`);
-        } finally {
-          triggerBtn.disabled = false;
-          triggerBtn.innerText = 'Launch Orchestration';
+    // Listen to system OS theme changes if user hasn't explicitly set one
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+        if (!localStorage.getItem('repo-analyzer-theme')) {
+          const theme = e.matches ? 'light' : 'dark';
+          this.stateMachine.setTheme(theme);
+          this.updateThemeButton(theme);
         }
       });
     }
   }
 
-  // ---------------- GitHub Modal ----------------
-  bindGithubModal() {
-    const modal = document.getElementById('githubModal');
-    const openBtn = document.getElementById('btnOpenGithubModal');
-    const closeBtn = document.getElementById('btnCloseGithubModal');
-    const cancelBtn = document.getElementById('btnCancelGithub');
-    const form = document.getElementById('githubForm');
-    const statusMsg = document.getElementById('githubStatusMsg');
-    const submitBtn = document.getElementById('btnSubmitGithub');
+  updateThemeButton(theme) {
+    if (!this.dom.btnThemeToggle) return;
+    const icon = this.dom.btnThemeToggle.querySelector('.theme-icon');
+    if (icon) {
+      icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+    }
+    this.dom.btnThemeToggle.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
+  }
 
-    const closeModal = () => {
-      modal.style.display = 'none';
-      if (statusMsg) {
-        statusMsg.style.display = 'none';
-        statusMsg.innerHTML = '';
-      }
-    };
-
-    if (openBtn) openBtn.addEventListener('click', () => { modal.style.display = 'flex'; });
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-
-    const executeAnalysis = async (url, depth, runAudit, statusEl, btnEl, onComplete) => {
-      btnEl.disabled = true;
-      const originalText = btnEl.innerText;
-      btnEl.innerText = '⏳ Processing Repo...';
-
-      if (statusEl) {
-        statusEl.style.display = 'block';
-        statusEl.style.background = 'rgba(0, 240, 255, 0.08)';
-        statusEl.style.border = '1px solid rgba(0, 240, 255, 0.25)';
-        statusEl.style.color = '#00f0ff';
-        statusEl.innerHTML = `
-          <div>🔄 <strong>Cloning repository & running Multi-Agent pipeline...</strong></div>
-          <div style="font-size:0.75rem; color:#94a3b8; margin-top:0.3rem;">
-            1. Git clone & shallow checkout<br>
-            2. Structure Mapper AST indexing<br>
-            3. Relationship Linker code edges<br>
-            4. Data & Service Mapper APIs & DBs<br>
-            ${runAudit ? '5. Autonomous 16-Agent Audit (Quality, Security, Critic)' : ''}
-          </div>
-        `;
-      }
-
-      try {
-        const res = await fetch('/api/github-analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, depth, run_orchestration: runAudit }),
-        });
-
+  async checkBackendHealth() {
+    try {
+      const res = await fetch('/api/status', { method: 'GET', signal: AbortSignal.timeout(1200) });
+      if (res.ok) {
         const data = await res.json();
-        if (!res.ok || data.error) {
-          throw new Error(data.error || 'Failed to analyze repository');
+        if (data.status === 'online') {
+          this.isBackendAlive = true;
+          console.log('Repository Analyzer backend API detected at /api');
         }
-
-        if (statusEl) {
-          statusEl.style.background = 'rgba(16, 185, 129, 0.1)';
-          statusEl.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-          statusEl.style.color = '#10b981';
-          statusEl.innerHTML = `
-            <div>✅ <strong>Successfully analyzed ${data.repo_name}!</strong></div>
-            <div style="font-size:0.75rem; color:#cbd5e1; margin-top:0.25rem;">
-              • Scanned Files: ${data.files_scanned || 0}<br>
-              • Code Entities: ${data.nodes_count || 0}<br>
-              • Code Edges: ${data.edges_count || 0}<br>
-              • APIs / DBs: ${data.apis_count || 0} / ${data.tables_count || 0}
-            </div>
-          `;
-        }
-
-        await this.refreshAll();
-
-        setTimeout(() => {
-          if (onComplete) onComplete();
-          this.switchTab('graph');
-        }, 1400);
-
-      } catch (err) {
-        if (statusEl) {
-          statusEl.style.background = 'rgba(239, 68, 68, 0.1)';
-          statusEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-          statusEl.style.color = '#ef4444';
-          statusEl.innerHTML = `❌ <strong>Error:</strong> ${err.message || err}`;
-        }
-      } finally {
-        btnEl.disabled = false;
-        btnEl.innerText = originalText;
       }
-    };
-
-    if (form) {
-      form.addEventListener('submit', async e => {
-        e.preventDefault();
-        const url = document.getElementById('githubUrl').value.trim();
-        const depth = parseInt(document.getElementById('githubDepth').value, 10) || 1;
-        const runAudit = document.getElementById('githubRunAudit').checked;
-        await executeAnalysis(url, depth, runAudit, statusMsg, submitBtn, closeModal);
-      });
-    }
-
-    const topForm = document.getElementById('topGithubForm');
-    const topInput = document.getElementById('topGithubUrl');
-    const topStatus = document.getElementById('topGithubStatus');
-    const topBtn = document.getElementById('btnTopSubmitGithub');
-
-    if (topForm) {
-      topForm.addEventListener('submit', async e => {
-        e.preventDefault();
-        const url = topInput.value.trim();
-        await executeAnalysis(url, 1, true, topStatus, topBtn, () => {
-          if (topStatus) setTimeout(() => { topStatus.style.display = 'none'; }, 5000);
-        });
-      });
+    } catch (e) {
+      // Backend not running, app seamlessly uses Mock Stream
+      this.isBackendAlive = false;
+      console.log('Running in standalone frontend mode with mock stream engine.');
     }
   }
 
-  // ---------------- Graph Controls ----------------
-  bindGraphControls() {
-    const resetBtn = document.getElementById('btnGraphReset');
-    const zoomInBtn = document.getElementById('btnGraphZoomIn');
-    const zoomOutBtn = document.getElementById('btnGraphZoomOut');
-    const searchInput = document.getElementById('graphSearchInput');
+  initComponents() {
+    // 1. RepoInput
+    this.components.repoInput = new RepoInput({
+      inputEl: document.getElementById('repoUrlInput'),
+      buttonEl: document.getElementById('btnAnalyze'),
+      errorEl: document.getElementById('inputError'),
+      formEl: document.getElementById('landingForm'),
+      chipsContainerEl: document.getElementById('quickChipsContainer'),
+      stateMachine: this.stateMachine,
+      onSubmit: (validated) => {
+        this.handleRepoSubmit(validated);
+      },
+    });
 
-    if (resetBtn) resetBtn.addEventListener('click', () => this.graph.resetView());
-    if (zoomInBtn) zoomInBtn.addEventListener('click', () => this.graph.zoom(1.25));
-    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => this.graph.zoom(0.8));
-    if (searchInput) {
-      searchInput.addEventListener('input', e => {
-        this.graph.setFilter(e.target.value);
+    // 2. Pipeline DAG
+    const dagContainer = document.getElementById('panelPipelineDAG');
+    if (dagContainer) {
+      this.components.dag = new PipelineDAG(dagContainer);
+    }
+
+    // 3. Live Graph
+    const graphContainer = document.getElementById('panelLiveGraph');
+    if (graphContainer) {
+      this.components.graph = new LiveGraph(graphContainer, (format) => {
+        this.downloadRegistry(format);
       });
     }
+
+    // 4. Agents Feed
+    const agentContainer = document.getElementById('panelAgentFeed');
+    if (agentContainer) {
+      this.components.agents = new AgentFeed(agentContainer);
+    }
+
+    // 5. Critic Review
+    const criticContainer = document.getElementById('panelCriticReview');
+    if (criticContainer) {
+      this.components.critic = new CriticReview(criticContainer);
+    }
+
+    // 6. Final Summary
+    const summaryContainer = document.getElementById('panelSummary');
+    if (summaryContainer) {
+      this.components.summary = new SummaryPanel(
+        summaryContainer,
+        () => this.handleReturnToLanding(),
+        (format) => this.downloadRegistry(format)
+      );
+    }
+  }
+
+  bindStateTransitions() {
+    this.stateMachine.on('state_changed', ({ from, to, url, repo, owner, error, summary }) => {
+      console.log(`[State Transition] ${from} -> ${to}`);
+
+      if (to === AppState.IDLE) {
+        this.renderIdleState();
+      } else if (to === AppState.ANALYZING) {
+        this.renderAnalyzingState(repo, owner, url);
+      } else if (to === AppState.COMPLETE) {
+        this.renderCompleteState(summary);
+      } else if (to === AppState.ERROR) {
+        this.renderErrorState(error);
+      }
+    });
+  }
+
+  bindTopBarEvents() {
+    if (this.dom.btnNewAnalysis) {
+      this.dom.btnNewAnalysis.addEventListener('click', () => {
+        this.handleReturnToLanding();
+      });
+    }
+
+    if (this.dom.streamModeToggle) {
+      this.dom.streamModeToggle.addEventListener('click', () => {
+        this.streamMode = this.streamMode === 'mock' ? 'live' : 'mock';
+        this.dom.streamModeToggle.textContent = this.streamMode === 'mock' ? 'Mode: Demo Stream' : 'Mode: Live API';
+        this.dom.streamModeToggle.classList.toggle('is-live', this.streamMode === 'live');
+        this.showToast(`Switched to ${this.streamMode === 'mock' ? 'Interactive Demo Stream' : 'Live Backend API'}`);
+      });
+    }
+
+    if (this.dom.btnRetryAnalysis) {
+      this.dom.btnRetryAnalysis.addEventListener('click', () => {
+        if (this.stateMachine.repoUrl) {
+          const res = this.stateMachine.validateUrl(this.stateMachine.repoUrl);
+          this.handleRepoSubmit(res);
+        } else {
+          this.handleReturnToLanding();
+        }
+      });
+    }
+
+    if (this.dom.btnErrorReturn) {
+      this.dom.btnErrorReturn.addEventListener('click', () => {
+        this.handleReturnToLanding();
+      });
+    }
+
+    // Top Bar Download Registry Dropdown
+    if (this.dom.btnTopBarDownloadRegistry && this.dom.topBarDownloadDropdown) {
+      this.dom.btnTopBarDownloadRegistry.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dd = this.dom.topBarDownloadDropdown;
+        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+      });
+
+      document.addEventListener('click', () => {
+        if (this.dom.topBarDownloadDropdown) {
+          this.dom.topBarDownloadDropdown.style.display = 'none';
+        }
+      });
+
+      if (this.dom.btnTopBarDlCsv) {
+        this.dom.btnTopBarDlCsv.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.dom.topBarDownloadDropdown.style.display = 'none';
+          this.downloadRegistry('csv');
+        });
+      }
+
+      if (this.dom.btnTopBarDlCallGraphCsv) {
+        this.dom.btnTopBarDlCallGraphCsv.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.dom.topBarDownloadDropdown.style.display = 'none';
+          this.downloadRegistry('callgraph_csv');
+        });
+      }
+
+      if (this.dom.btnTopBarDlJson) {
+        this.dom.btnTopBarDlJson.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.dom.topBarDownloadDropdown.style.display = 'none';
+          this.downloadRegistry('json');
+        });
+      }
+    }
+  }
+
+  bindCollapsiblePanels() {
+    document.querySelectorAll('.panel-card').forEach(panel => {
+      const collapseBtn = panel.querySelector('.btn-collapse');
+      if (collapseBtn) {
+        collapseBtn.addEventListener('click', () => {
+          panel.classList.toggle('is-collapsed');
+          const isCollapsed = panel.classList.contains('is-collapsed');
+          collapseBtn.setAttribute('aria-expanded', !isCollapsed);
+          collapseBtn.title = isCollapsed ? 'Expand Panel' : 'Collapse Panel';
+        });
+      }
+    });
+  }
+
+  bindKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+      // Escape closes any fullscreen panel or clears focus
+      if (e.key === 'Escape') {
+        const fsPanel = document.querySelector('.panel-card.is-fullscreen');
+        if (fsPanel) {
+          fsPanel.classList.remove('is-fullscreen');
+          if (this.components.graph) {
+            this.components.graph.initCanvasSize();
+            this.components.graph.draw();
+          }
+        }
+      }
+    });
+  }
+
+  // =========================================================================
+  // STATE RENDERING LOGIC
+  // =========================================================================
+
+  renderIdleState() {
+    this.streamService.stop();
+
+    // Reset components
+    if (this.components.dag) this.components.dag.reset();
+    if (this.components.graph) this.components.graph.reset();
+    if (this.components.agents) this.components.agents.reset();
+    if (this.components.critic) this.components.critic.reset();
+    if (this.components.summary) this.components.summary.reset();
+
+    // Animate Landing View In, Top Bar & Workspace Out
+    this.dom.app.setAttribute('data-state', 'idle');
+    this.dom.topBar.classList.remove('is-visible');
+    this.dom.analysisView.classList.remove('is-visible');
+    this.dom.errorView.classList.remove('is-visible');
+    this.dom.landingView.classList.remove('is-hidden');
+
+    this.setProgress(0);
+    this.components.repoInput.clear();
+    this.components.repoInput.focus();
+  }
+
+  renderAnalyzingState(repo, owner, url) {
+    // Populate top bar
+    if (this.dom.activeRepoName) {
+      this.dom.activeRepoName.textContent = `${owner}/${repo}`;
+    }
+    if (this.dom.activeRepoLink) {
+      this.dom.activeRepoLink.href = url;
+    }
+    if (this.dom.topBarStatus) {
+      this.dom.topBarStatus.textContent = 'Initializing multi-agent pipeline...';
+      this.dom.topBarStatus.className = 'top-bar-status is-active';
+    }
+
+    // Animate: Landing disappears, Top Bar slides down, Analysis Workspace slides up
+    this.dom.landingView.classList.add('is-hidden');
+    this.dom.topBar.classList.add('is-visible');
+    this.dom.analysisView.classList.add('is-visible');
+    this.dom.errorView.classList.remove('is-visible');
+
+    // Canvas size initialization after layout paints
+    setTimeout(() => {
+      if (this.components.graph) {
+        this.components.graph.initCanvasSize();
+        this.components.graph.draw();
+      }
+    }, 120);
+
+    // Start Live Stream
+    this.startStreamingPipeline({ repo, owner, url });
+  }
+
+  renderCompleteState(summary) {
+    if (this.dom.topBarStatus) {
+      this.dom.topBarStatus.textContent = `Audit Complete • Health Score ${Math.round(summary.healthScore)}/100`;
+      this.dom.topBarStatus.className = 'top-bar-status is-complete';
+    }
+    this.setProgress(100);
+
+    if (this.components.summary) {
+      this.components.summary.setSummary(summary);
+    }
+  }
+
+  renderErrorState(errorMessage) {
+    this.streamService.stop();
+    this.dom.analysisView.classList.remove('is-visible');
+    this.dom.errorView.classList.add('is-visible');
+    if (this.dom.errorMessageText) {
+      this.dom.errorMessageText.textContent = errorMessage || 'An unexpected error occurred during repository analysis.';
+    }
+    if (this.dom.topBarStatus) {
+      this.dom.topBarStatus.textContent = 'Analysis Failed';
+      this.dom.topBarStatus.className = 'top-bar-status is-error';
+    }
+  }
+
+  // =========================================================================
+  // PIPELINE STREAM DISPATCH
+  // =========================================================================
+
+  handleRepoSubmit(validated) {
+    const success = this.stateMachine.startAnalysis(validated.canonicalUrl);
+    if (!success) {
+      console.warn('Could not initiate analysis for URL:', validated);
+    }
+  }
+
+  handleReturnToLanding() {
+    this.streamService.stop();
+    this.stateMachine.resetToLanding();
+  }
+
+  startStreamingPipeline(repoInfo) {
+    this.setProgress(5);
+
+    this.streamService.start(
+      repoInfo,
+      {
+        onPipelineStage: (stage) => {
+          if (this.components.dag) this.components.dag.updateStage(stage);
+          if (stage.status === 'running' && this.dom.topBarStatus) {
+            this.dom.topBarStatus.textContent = `Stage ${stage.index || ''} of ${stage.total || 8}: ${stage.title}`;
+          }
+        },
+        onGraphNode: (node) => {
+          if (this.components.graph) this.components.graph.addNode(node);
+        },
+        onGraphEdge: (edge) => {
+          if (this.components.graph) this.components.graph.addEdge(edge);
+        },
+        onAgentUpdate: (agentUpdate) => {
+          if (this.components.agents) this.components.agents.updateAgent(agentUpdate);
+        },
+        onCriticFinding: (finding) => {
+          if (this.components.critic) this.components.critic.addFinding(finding);
+        },
+        onProgress: ({ percent, stageName }) => {
+          this.setProgress(percent);
+          if (stageName && this.dom.topBarStatus) {
+            this.dom.topBarStatus.textContent = stageName;
+          }
+        },
+        onSummary: (summary) => {
+          this.stateMachine.completeAnalysis(summary);
+        },
+        onError: (err) => {
+          this.stateMachine.failAnalysis(err.message || 'Analysis pipeline execution error');
+        },
+        onNotice: (msg) => {
+          this.showToast(msg);
+        },
+        onComplete: () => {
+          console.log('Stream analysis pipeline completed successfully.');
+        },
+      },
+      this.streamMode
+    );
+  }
+
+  downloadRegistry(format = 'json') {
+    const repoName = this.stateMachine.repoName || 'repository';
+
+    if (this.streamMode === 'live' || this.isBackendAlive) {
+      window.location.href = `/api/registry/download?format=${format}`;
+      this.showToast(`Downloading Codebase Registry (.${format.toUpperCase()})...`);
+      return;
+    }
+
+    // Standalone client-side extraction export from the active code graph
+    const nodes = (this.components.graph && this.components.graph.nodes) || [];
+    const edges = (this.components.graph && this.components.graph.edges) || [];
+
+    if (nodes.length === 0) {
+      this.showToast('No code entities discovered yet to extract.');
+      return;
+    }
+
+    // Pre-aggregate relations per node
+    const callsMap = new Map();
+    const calledByMap = new Map();
+    const queriesMap = new Map();
+    const routesToMap = new Map();
+    const containerMap = new Map();
+
+    edges.forEach(e => {
+      const sId = e.source.id || e.source;
+      const tId = e.target.id || e.target;
+      const sNode = nodes.find(n => n.id === sId);
+      const tNode = nodes.find(n => n.id === tId);
+      const sName = sNode ? (sNode.label || sNode.name) : sId;
+      const tName = tNode ? (tNode.label || tNode.name) : tId;
+      const rel = e.type || 'connects';
+
+      if (rel === 'calls') {
+        if (!callsMap.has(sId)) callsMap.set(sId, []);
+        callsMap.get(sId).push(tName);
+        if (!calledByMap.has(tId)) calledByMap.set(tId, []);
+        calledByMap.get(tId).push(sName);
+      } else if (rel === 'routes_to') {
+        if (!routesToMap.has(sId)) routesToMap.set(sId, []);
+        routesToMap.get(sId).push(tName);
+        if (!calledByMap.has(tId)) calledByMap.set(tId, []);
+        calledByMap.get(tId).push(sName);
+      } else if (rel === 'queries') {
+        if (!queriesMap.has(sId)) queriesMap.set(sId, []);
+        queriesMap.get(sId).push(tName);
+      } else if (rel === 'contains' || rel === 'defines') {
+        containerMap.set(tId, sName);
+      }
+    });
+
+    // FORMAT 1: Dedicated Call Graph Matrix CSV
+    if (format === 'callgraph_csv' || format === 'relations_csv') {
+      const headers = [
+        'caller_id', 'caller_name', 'caller_type', 'caller_path',
+        'callee_id', 'callee_name', 'callee_type', 'callee_path',
+        'relationship', 'line_number'
+      ];
+      const rows = edges.map(e => {
+        const sId = e.source.id || e.source;
+        const tId = e.target.id || e.target;
+        const sNode = nodes.find(n => n.id === sId) || {};
+        const tNode = nodes.find(n => n.id === tId) || {};
+        return [
+          `"${sId}"`,
+          `"${(sNode.label || sNode.name || sId).replace(/"/g, '""')}"`,
+          `"${sNode.type || ''}"`,
+          `"${sNode.path || ''}"`,
+          `"${tId}"`,
+          `"${(tNode.label || tNode.name || tId).replace(/"/g, '""')}"`,
+          `"${tNode.type || ''}"`,
+          `"${tNode.path || ''}"`,
+          `"${e.type || 'relates'}"`,
+          `"${sNode.line || ''}"`
+        ];
+      });
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `callgraph_${repoName}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.showToast(`Extracted ${edges.length} call graph connections to callgraph_${repoName}.csv`);
+      return;
+    }
+
+    // FORMAT 2: Enriched Entity Registry CSV with who-calls-who columns
+    if (format === 'csv' || format === 'entities_csv') {
+      const headers = [
+        'id', 'name', 'type', 'path', 'line',
+        'calls', 'called_by', 'routes_to', 'queries_tables', 'parent_container'
+      ];
+      const rows = nodes.map(n => [
+        `"${n.id || ''}"`,
+        `"${(n.label || n.name || '').replace(/"/g, '""')}"`,
+        `"${n.type || ''}"`,
+        `"${n.path || ''}"`,
+        `"${n.line || ''}"`,
+        `"${(callsMap.get(n.id) || []).join('; ')}"`,
+        `"${(calledByMap.get(n.id) || []).join('; ')}"`,
+        `"${(routesToMap.get(n.id) || []).join('; ')}"`,
+        `"${(queriesMap.get(n.id) || []).join('; ')}"`,
+        `"${containerMap.get(n.id) || ''}"`
+      ]);
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `registry_functions_calls_${repoName}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.showToast(`Extracted ${nodes.length} functions & entities with call relations to registry_functions_calls_${repoName}.csv`);
+      return;
+    }
+
+    // FORMAT 3: Enriched JSON Payload
+    const payload = {
+      repository: repoName,
+      extracted_at: new Date().toISOString(),
+      total_entities: nodes.length,
+      total_relations: edges.length,
+      entities: nodes.map(n => ({
+        id: n.id,
+        name: n.label || n.name,
+        type: n.type,
+        path: n.path,
+        line: n.line,
+        layer: n.layer,
+        relations: {
+          calls: callsMap.get(n.id) || [],
+          called_by: calledByMap.get(n.id) || [],
+          routes_to: routesToMap.get(n.id) || [],
+          queries_tables: queriesMap.get(n.id) || [],
+          parent_container: containerMap.get(n.id) || '',
+        },
+        degree: edges.filter(e => (e.source.id || e.source) === n.id || (e.target.id || e.target) === n.id).length,
+      })),
+      relationships: edges.map(e => ({
+        source: e.source.id || e.source,
+        target: e.target.id || e.target,
+        type: e.type || 'connects'
+      })),
+      call_graph: edges.filter(e => (e.type || '') === 'calls').map(e => ({
+        caller: e.source.id || e.source,
+        callee: e.target.id || e.target,
+      }))
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `registry_${repoName}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.showToast(`Extracted ${nodes.length} code entities & relations to registry_${repoName}.json`);
+  }
+
+  setProgress(percent) {
+    if (this.dom.progressBar) {
+      this.dom.progressBar.style.width = `${percent}%`;
+      this.dom.progressBar.setAttribute('aria-valuenow', percent);
+      if (percent >= 100) {
+        setTimeout(() => {
+          if (this.stateMachine.state === AppState.COMPLETE) {
+            this.dom.progressBar.style.opacity = '0';
+          }
+        }, 800);
+      } else {
+        this.dom.progressBar.style.opacity = '1';
+      }
+    }
+  }
+
+  showToast(message) {
+    let toast = document.getElementById('appToast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'appToast';
+      toast.className = 'app-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('visible');
+    setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 3200);
   }
 }
 
-// Global bootstrap
-let app;
-window.addEventListener('DOMContentLoaded', () => {
-  app = new DashboardApp();
+// Global bootstrap on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  window.app = new RepositoryAnalyzerApp();
 });

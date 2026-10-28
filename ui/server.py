@@ -70,25 +70,32 @@ class MultiAgentUIServer:
 
     def __init__(
         self,
-        repo_root: str = ".",
+        repo_root: Optional[str] = ".",
         storage_path: Optional[str] = None,
         port: int = 8080,
         host: str = "127.0.0.1",
     ):
-        self.repo_root = Path(repo_root).resolve()
         self.port = port
         self.host = host
         self.store = CodeRegistryStore(persistence_path=storage_path)
-        self.orchestrator = OrchestratorAgent(registry_store=self.store, repo_root=str(self.repo_root))
         self.static_dir = Path(__file__).parent / "static"
         self._lock = threading.Lock()
         self.latest_output: Optional[Dict[str, Any]] = None
         self.approval_decisions: Dict[str, Dict[str, Any]] = {}
         self.httpd: Optional[http.server.ThreadingHTTPServer] = None
-        self._load_cached_report()
+
+        if repo_root and str(repo_root).strip().lower() not in ("none", "", "blank"):
+            self.repo_root: Optional[Path] = Path(repo_root).resolve()
+            self.orchestrator: Optional[OrchestratorAgent] = OrchestratorAgent(registry_store=self.store, repo_root=str(self.repo_root))
+            self._load_cached_report()
+        else:
+            self.repo_root = None
+            self.orchestrator = None
 
     def _load_cached_report(self) -> None:
         """Attempt to restore the latest generated report from disk cache."""
+        if not self.repo_root:
+            return
         cache_file = self.repo_root / ".registry" / "latest_report.json"
         if cache_file.exists():
             try:
@@ -99,6 +106,8 @@ class MultiAgentUIServer:
 
     def _save_cached_report(self, data: Dict[str, Any]) -> None:
         """Persist latest orchestration run to disk cache."""
+        if not self.repo_root:
+            return
         cache_file = self.repo_root / ".registry" / "latest_report.json"
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -142,8 +151,9 @@ class MultiAgentUIServer:
 
         return {
             "status": "online",
-            "repo_name": self.repo_root.name,
-            "repo_root": str(self.repo_root),
+            "repo_name": self.repo_root.name if self.repo_root else None,
+            "repo_root": str(self.repo_root) if self.repo_root else None,
+            "is_blank": self.repo_root is None,
             "storage_path": str(self.store.persistence_path or ":memory:"),
             "total_nodes": len(all_nodes),
             "type_counts": dict(type_counts),
@@ -231,39 +241,96 @@ class MultiAgentUIServer:
             if n.location.path:
                 file_to_nodes[n.location.path].append(n.id)
 
-        # Generate hierarchy edges (File -> contained entities) & inter-entity links
+        # Generate rich hierarchy & relational edges connecting modules, files, classes, functions, APIs, tables
         edges_list = []
         edge_set = set()
 
-        for path, nids in file_to_nodes.items():
-            file_id = f"file:{path.lstrip('./')}"
-            if file_id in node_id_set:
-                for child_id in nids:
-                    if child_id != file_id and child_id in node_id_set:
-                        edge_key = f"{file_id}->{child_id}"
-                        if edge_key not in edge_set:
-                            edge_set.add(edge_key)
-                            edges_list.append({
-                                "source": file_id,
-                                "target": child_id,
-                                "type": "contains",
-                                "color": "#334155",
-                            })
+        def add_edge(src: str, tgt: str, rel_type: str, color: str):
+            if src in node_id_set and tgt in node_id_set and src != tgt:
+                edge_key = f"{src}->{tgt}:{rel_type}"
+                if edge_key not in edge_set:
+                    edge_set.add(edge_key)
+                    edges_list.append({
+                        "source": src,
+                        "target": tgt,
+                        "type": rel_type,
+                        "color": color,
+                    })
 
-        # Connect API / DB tables to source files
+        # Map file paths to canonical file node IDs
+        path_to_file_id: Dict[str, str] = {}
+        for n in selected_nodes:
+            if n.type == NodeType.FILE:
+                clean_p = (n.location.path or "").strip("./")
+                if clean_p:
+                    path_to_file_id[clean_p] = n.id
+                path_to_file_id[n.id] = n.id
+
+        # 1. Connect File -> contained entities (Classes, Functions, Modules)
+        for path, nids in file_to_nodes.items():
+            clean_p = path.strip("./")
+            file_id = path_to_file_id.get(clean_p) or f"file:{clean_p}"
+            for child_id in nids:
+                if child_id != file_id:
+                    add_edge(file_id, child_id, "contains", "#00f0ff")
+
+        # 2. Connect APIs and DB Tables to their source files & handler functions
         for n in selected_nodes:
             if n.type in (NodeType.API, NodeType.TABLE) and n.location.path:
-                file_id = f"file:{n.location.path.lstrip('./')}"
-                if file_id in node_id_set:
-                    edge_key = f"{n.id}->{file_id}"
-                    if edge_key not in edge_set:
-                        edge_set.add(edge_key)
-                        edges_list.append({
-                            "source": n.id,
-                            "target": file_id,
-                            "type": "defines",
-                            "color": "#10b981" if n.type == NodeType.API else "#3b82f6",
-                        })
+                clean_p = n.location.path.strip("./")
+                file_id = path_to_file_id.get(clean_p) or f"file:{clean_p}"
+                edge_color = "#10b981" if n.type == NodeType.API else "#3b82f6"
+                add_edge(n.id, file_id, "defines", edge_color)
+
+                # Connect APIs to matching functions in the same file
+                if n.type == NodeType.API:
+                    for sibling_id in file_to_nodes.get(n.location.path, []):
+                        if sibling_id.startswith("func:") or "function" in sibling_id:
+                            add_edge(n.id, sibling_id, "routes_to", "#10b981")
+
+                # Connect Tables to queries and sibling entities
+                if n.type == NodeType.TABLE:
+                    for sibling_id in file_to_nodes.get(n.location.path, []):
+                        if sibling_id != n.id and (sibling_id.startswith("class:") or sibling_id.startswith("func:")):
+                            add_edge(sibling_id, n.id, "queries", "#3b82f6")
+
+        # 3. Connect Classes to contained methods & functions
+        classes_in_graph = [n for n in selected_nodes if n.type == NodeType.CLASS]
+        functions_in_graph = [n for n in selected_nodes if n.type == NodeType.FUNCTION]
+        for c in classes_in_graph:
+            for f in functions_in_graph:
+                if f.location.path == c.location.path:
+                    # If function signature or ID indicates it belongs to class
+                    if c.name.lower() in f.id.lower() or (c.location.start_line and f.location.start_line and c.location.start_line <= f.location.start_line <= (c.location.end_line or 999999)):
+                        add_edge(c.id, f.id, "defines", "#a855f7")
+
+        # 4. Connect intra-file functions (calls & chained logic)
+        for path, nids in file_to_nodes.items():
+            func_ids = [nid for nid in nids if nid.startswith("func:") or "function" in nid]
+            for i in range(len(func_ids) - 1):
+                add_edge(func_ids[i], func_ids[i + 1], "calls", "#f59e0b")
+
+        # 5. Connect Module nodes to Files
+        module_nodes = [n for n in selected_nodes if n.type == NodeType.MODULE]
+        for m in module_nodes:
+            for f_node in selected_nodes:
+                if f_node.type == NodeType.FILE and f_node.location.path:
+                    if m.name.lower() in f_node.location.path.lower():
+                        add_edge(m.id, f_node.id, "imports", "#ec4899")
+
+        # 6. Read verified edges from persistent registry if present
+        if self.repo_root:
+            edges_file = self.repo_root / ".registry" / "edges.json"
+            if edges_file.exists():
+                try:
+                    persisted_edges = json.loads(edges_file.read_text(encoding="utf-8"))
+                    for pe in persisted_edges:
+                        s = pe.get("source") or pe.get("source_id")
+                        t = pe.get("target") or pe.get("target_id")
+                        rel = pe.get("type", "calls")
+                        add_edge(s, t, rel, "#f59e0b" if rel == "calls" else "#a855f7")
+                except Exception:
+                    pass
 
         return {
             "nodes": nodes_list,
@@ -275,6 +342,9 @@ class MultiAgentUIServer:
 
     def run_orchestration(self, req_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute orchestrated pipeline across all agent layers."""
+        if not self.orchestrator or not self.repo_root:
+            raise ValueError("No active repository loaded. Please submit a GitHub repository URL to analyze first.")
+
         with self._lock:
             plan_req = TaskPlanRequest(
                 task_title=req_data.get("task_title", "Full Codebase Security & Health Audit"),
@@ -290,6 +360,20 @@ class MultiAgentUIServer:
             self.latest_output = out_dict
             self._save_cached_report(out_dict)
             return out_dict
+
+    def clear_repository(self) -> Dict[str, Any]:
+        """Clear active repository and reset store to a clean empty state."""
+        with self._lock:
+            self.repo_root = None
+            self.store = CodeRegistryStore()
+            self.orchestrator = None
+            self.latest_output = None
+            self.approval_decisions.clear()
+        return {
+            "success": True,
+            "message": "Repository removed. System is ready for any GitHub repository URL.",
+            "repo_name": None,
+        }
 
     def record_approval(self, option_id: str, decision: str, notes: str = "") -> Dict[str, Any]:
         """Store Human-in-the-Loop authorization decisions."""
@@ -443,18 +527,221 @@ class MultiAgentRequestHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/logs":
             limit = int(query.get("limit", ["50"])[0])
-            log_file = self.server_app.repo_root / "logs" / "agents.jsonl"
             records: List[Dict[str, Any]] = []
-            if log_file.exists():
-                try:
-                    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
-                    for line in lines[-limit:]:
-                        if line.strip():
-                            records.append(json.loads(line))
-                except Exception as e:
-                    records.append({"error": f"Failed to parse log: {e}"})
+            if self.server_app.repo_root:
+                log_file = self.server_app.repo_root / "logs" / "agents.jsonl"
+                if log_file.exists():
+                    try:
+                        lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+                        for line in lines[-limit:]:
+                            if line.strip():
+                                records.append(json.loads(line))
+                    except Exception as e:
+                        records.append({"error": f"Failed to parse log: {e}"})
             self._set_headers(200, "application/json")
             self.wfile.write(json.dumps({"logs": records}).encode("utf-8"))
+            return
+
+        elif path in ("/api/registry", "/api/registry/download"):
+            nodes = self.server_app.store.list_all(include_deleted=False)
+            repo_name = self.server_app.repo_root.name if self.server_app.repo_root else "codebase"
+            format_type = query.get("format", ["json"])[0].lower()
+
+            # Retrieve complete graph with relational edges connecting modules, functions, files, APIs, tables
+            graph_data = self.server_app.get_graph_payload(node_limit=10000)
+            edges = graph_data.get("edges", [])
+            node_map = {n.id: n for n in nodes}
+
+            # Pre-aggregate relations per node for fast lookup
+            calls_map: Dict[str, List[str]] = defaultdict(list)
+            called_by_map: Dict[str, List[str]] = defaultdict(list)
+            imports_map: Dict[str, List[str]] = defaultdict(list)
+            imported_by_map: Dict[str, List[str]] = defaultdict(list)
+            queries_map: Dict[str, List[str]] = defaultdict(list)
+            routes_to_map: Dict[str, List[str]] = defaultdict(list)
+            container_map: Dict[str, str] = {}
+
+            for e in edges:
+                s, t, rel = e.get("source"), e.get("target"), e.get("type")
+                if not s or not t:
+                    continue
+                s_name = node_map[s].name if s in node_map else s
+                t_name = node_map[t].name if t in node_map else t
+
+                if rel == "calls":
+                    if t_name not in calls_map[s]:
+                        calls_map[s].append(t_name)
+                    if s_name not in called_by_map[t]:
+                        called_by_map[t].append(s_name)
+                elif rel == "routes_to":
+                    if t_name not in routes_to_map[s]:
+                        routes_to_map[s].append(t_name)
+                    if s_name not in called_by_map[t]:
+                        called_by_map[t].append(s_name)
+                elif rel == "queries":
+                    if t_name not in queries_map[s]:
+                        queries_map[s].append(t_name)
+                elif rel == "imports":
+                    if t_name not in imports_map[s]:
+                        imports_map[s].append(t_name)
+                    if s_name not in imported_by_map[t]:
+                        imported_by_map[t].append(s_name)
+                elif rel in ("contains", "defines"):
+                    container_map[t] = s_name
+
+            # Also check node metadata for persisted incoming/outgoing edges from RelationshipLinker
+            for n in nodes:
+                out_edges = n.metadata.get("outgoing_edges", [])
+                for oe in out_edges:
+                    tgt = oe.get("target_id")
+                    etype = oe.get("type")
+                    tgt_name = node_map[tgt].name if tgt in node_map else tgt
+                    if etype == "calls" and tgt_name not in calls_map[n.id]:
+                        calls_map[n.id].append(tgt_name)
+                        called_by_map[tgt].append(n.name)
+                    elif etype == "imports" and tgt_name not in imports_map[n.id]:
+                        imports_map[n.id].append(tgt_name)
+                        imported_by_map[tgt].append(n.name)
+
+            # FORMAT 1: Dedicated Call Graph / Interconnection Matrix CSV
+            if format_type in ("callgraph_csv", "relations_csv", "callgraph"):
+                import csv
+                import io
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                writer.writerow([
+                    "caller_id",
+                    "caller_name",
+                    "caller_type",
+                    "caller_path",
+                    "callee_id",
+                    "callee_name",
+                    "callee_type",
+                    "callee_path",
+                    "relationship",
+                    "line_number"
+                ])
+
+                for e in edges:
+                    s_id = e.get("source")
+                    t_id = e.get("target")
+                    rel = e.get("type", "relates")
+                    s_node = node_map.get(s_id)
+                    t_node = node_map.get(t_id)
+
+                    s_name = s_node.name if s_node else s_id
+                    t_name = t_node.name if t_node else t_id
+                    s_type = s_node.type.value if s_node and hasattr(s_node.type, "value") else (str(s_node.type) if s_node else "")
+                    t_type = t_node.type.value if t_node and hasattr(t_node.type, "value") else (str(t_node.type) if t_node else "")
+                    s_path = s_node.location.path if s_node and s_node.location else ""
+                    t_path = t_node.location.path if t_node and t_node.location else ""
+                    line_num = s_node.location.start_line if s_node and s_node.location else ""
+
+                    writer.writerow([
+                        s_id,
+                        s_name,
+                        s_type,
+                        s_path,
+                        t_id,
+                        t_name,
+                        t_type,
+                        t_path,
+                        rel,
+                        line_num,
+                    ])
+
+                csv_bytes = buf.getvalue().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="callgraph_{repo_name}.csv"')
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+                return
+
+            # FORMAT 2: Enriched Entity Registry CSV with who-calls-who columns
+            elif format_type in ("csv", "entities_csv"):
+                import csv
+                import io
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                writer.writerow([
+                    "id",
+                    "name",
+                    "type",
+                    "path",
+                    "start_line",
+                    "end_line",
+                    "signature",
+                    "calls",
+                    "called_by",
+                    "routes_to",
+                    "queries_tables",
+                    "imports",
+                    "imported_by",
+                    "parent_container",
+                    "hash",
+                    "status"
+                ])
+                for n in nodes:
+                    writer.writerow([
+                        n.id,
+                        n.name,
+                        n.type.value if hasattr(n.type, "value") else str(n.type),
+                        n.location.path if n.location else "",
+                        n.location.start_line if n.location else "",
+                        n.location.end_line if n.location else "",
+                        n.location.signature if n.location else "",
+                        "; ".join(calls_map.get(n.id, [])),
+                        "; ".join(called_by_map.get(n.id, [])),
+                        "; ".join(routes_to_map.get(n.id, [])),
+                        "; ".join(queries_map.get(n.id, [])),
+                        "; ".join(imports_map.get(n.id, [])),
+                        "; ".join(imported_by_map.get(n.id, [])),
+                        container_map.get(n.id, ""),
+                        n.hash or "",
+                        n.status.value if hasattr(n.status, "value") else str(n.status),
+                    ])
+                csv_bytes = buf.getvalue().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="registry_{repo_name}.csv"')
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(csv_bytes)
+                return
+
+            # FORMAT 3: Enriched JSON Payload
+            nodes_data = []
+            for n in nodes:
+                dump = n.model_dump()
+                dump["relations"] = {
+                    "calls": calls_map.get(n.id, []),
+                    "called_by": called_by_map.get(n.id, []),
+                    "routes_to": routes_to_map.get(n.id, []),
+                    "queries_tables": queries_map.get(n.id, []),
+                    "imports": imports_map.get(n.id, []),
+                    "imported_by": imported_by_map.get(n.id, []),
+                    "parent_container": container_map.get(n.id, ""),
+                }
+                nodes_data.append(dump)
+
+            payload = {
+                "repository": repo_name,
+                "extracted_at": time.time(),
+                "total_entities": len(nodes_data),
+                "total_relationships": len(edges),
+                "entities": nodes_data,
+                "relationships": edges,
+                "call_graph": [e for e in edges if e.get("type") == "calls"],
+            }
+            res_bytes = json.dumps(payload, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="registry_{repo_name}.json"')
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(res_bytes)
             return
 
         # ------------------ Static Files ------------------
@@ -533,6 +820,12 @@ class MultiAgentRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._set_headers(500, "application/json")
                 self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        elif path == "/api/clear-repo":
+            result = self.server_app.clear_repository()
+            self._set_headers(200, "application/json")
+            self.wfile.write(json.dumps(result).encode("utf-8"))
             return
 
         self._set_headers(404, "application/json")

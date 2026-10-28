@@ -206,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     ui_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     ui_parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind (default: 127.0.0.1)")
     ui_parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser on launch")
+    ui_parser.add_argument("--blank", "--no-default", action="store_true", dest="blank", help="Do not load default repository; start with clean state ready for GitHub URLs")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -895,9 +896,13 @@ def main():
 
     elif args.command == "ui":
         from ui.server import run_server
-        print(f"🌐 Launching Multi-Agent Interactive Dashboard on http://{args.host}:{args.port}...")
+        target_repo = None if getattr(args, "blank", False) else args.repo
+        if target_repo:
+            print(f"🌐 Launching Multi-Agent Dashboard on http://{args.host}:{args.port} (Repository: {target_repo})...")
+        else:
+            print(f"🌐 Launching Multi-Agent Dashboard on http://{args.host}:{args.port} (Clean Mode: Waiting for GitHub URL)...")
         server = run_server(
-            repo_root=args.repo,
+            repo_root=target_repo,
             storage_path=args.storage,
             port=args.port,
             host=args.host,

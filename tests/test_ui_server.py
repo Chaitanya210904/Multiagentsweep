@@ -199,3 +199,81 @@ def test_ui_server_github_analyze_api(test_server):
     assert data["repo_name"] == "bottle"
     assert data["nodes_count"] > 0
     assert "repos/bottle" in data["repo_root"]
+
+
+def test_ui_server_clear_repo_api(test_server):
+    """Verify that calling /api/clear-repo resets the active repository to clean blank state."""
+    base_url, app = test_server
+
+    req = urllib.request.Request(
+        f"{base_url}/api/clear-repo",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["success"] is True
+        assert data["repo_name"] is None
+
+    # Check status endpoint confirms blank state
+    with urllib.request.urlopen(f"{base_url}/api/status") as resp:
+        status_data = json.loads(resp.read().decode("utf-8"))
+        assert status_data["is_blank"] is True
+        assert status_data["repo_name"] is None
+
+
+def test_ui_server_registry_download_api(test_server):
+    """Verify that /api/registry and /api/registry/download export code entities and call graphs in JSON & CSV."""
+    base_url, app = test_server
+
+    # 1. Download as JSON (includes entities, relations, relationships, call_graph)
+    with urllib.request.urlopen(f"{base_url}/api/registry/download?format=json") as resp:
+        assert resp.status == 200
+        assert "application/json" in resp.headers.get("Content-Type", "")
+        assert "attachment" in resp.headers.get("Content-Disposition", "")
+        data = json.loads(resp.read().decode("utf-8"))
+        assert "entities" in data
+        assert "relationships" in data
+        assert "call_graph" in data
+        assert data["total_entities"] == 2
+        entity_ids = {e["id"] for e in data["entities"]}
+        assert "file:src/auth.py" in entity_ids
+        assert "api:POST:/api/v1/login" in entity_ids
+        # Verify entity relations dict exists
+        for ent in data["entities"]:
+            assert "relations" in ent
+            assert "calls" in ent["relations"]
+            assert "called_by" in ent["relations"]
+
+    # 2. Download as CSV (Enriched Entity list with calls, called_by, routes_to)
+    with urllib.request.urlopen(f"{base_url}/api/registry/download?format=csv") as resp:
+        assert resp.status == 200
+        assert "text/csv" in resp.headers.get("Content-Type", "")
+        assert "attachment" in resp.headers.get("Content-Disposition", "")
+        csv_text = resp.read().decode("utf-8")
+        lines = csv_text.strip().split("\n")
+        assert len(lines) >= 3  # Header + 2 entities
+        header = lines[0]
+        assert "calls" in header
+        assert "called_by" in header
+        assert "routes_to" in header
+        assert "file:src/auth.py" in csv_text
+        assert "api:POST:/api/v1/login" in csv_text
+
+    # 3. Download as Call Graph Matrix CSV (Who calls what row-by-row)
+    with urllib.request.urlopen(f"{base_url}/api/registry/download?format=callgraph_csv") as resp:
+        assert resp.status == 200
+        assert "text/csv" in resp.headers.get("Content-Type", "")
+        assert "callgraph_" in resp.headers.get("Content-Disposition", "")
+        cg_text = resp.read().decode("utf-8")
+        cg_lines = cg_text.strip().split("\n")
+        assert len(cg_lines) >= 2  # Header + at least 1 edge (API defines/routes_to)
+        cg_header = cg_lines[0]
+        assert "caller_id" in cg_header
+        assert "caller_name" in cg_header
+        assert "callee_id" in cg_header
+        assert "callee_name" in cg_header
+        assert "relationship" in cg_header
+
