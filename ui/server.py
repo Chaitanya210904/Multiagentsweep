@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,10 @@ from agents import (
     TEST_GENERATION_METADATA,
 )
 from agents.control.orchestrator import OrchestratorAgent
+from agents.graph.data_service_mapper import DataServiceMapper
+from agents.graph.registry_keeper import RegistryKeeper
+from agents.graph.relationship_linker import RelationshipLinker
+from agents.graph.structure_mapper import StructureMapper
 from core.logger import AgentLogger, agent_logger
 from models.control import TaskExecutionMode, TaskPlanRequest
 from models.registry import NodeType
@@ -298,6 +303,87 @@ class MultiAgentUIServer:
             self.approval_decisions[option_id] = record
             return record
 
+    def analyze_github_repo(
+        self,
+        url: str,
+        depth: int = 1,
+        run_orchestration: bool = True,
+    ) -> Dict[str, Any]:
+        """Clone an arbitrary GitHub repository, scan AST structure, link relationships, and audit."""
+        url = url.strip()
+        if not url.startswith("http://") and not url.startswith("https://") and not url.startswith("git@"):
+            raise ValueError(f"Invalid git repository URL: '{url}'")
+
+        repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
+        if not repo_name or any(c in repo_name for c in ("..", "/", "\\")):
+            raise ValueError(f"Invalid repository name derived from URL: '{repo_name}'")
+
+        dest_dir = (Path("repos") / repo_name).resolve()
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        agent_logger.info("control", "ui_server", "github.clone_started", f"Cloning {url} into {dest_dir} (depth={depth})...")
+        if not dest_dir.exists():
+            cmd = ["git", "clone", f"--depth={depth}", url, str(dest_dir)]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"Git clone failed: {res.stderr.strip() or res.stdout.strip()}")
+            agent_logger.info("control", "ui_server", "github.cloned", f"Successfully cloned {repo_name} to {dest_dir}")
+        else:
+            agent_logger.info("control", "ui_server", "github.reusing", f"Found existing clone at {dest_dir}")
+
+        storage_file = dest_dir / ".registry" / "registry.json"
+        target_store = CodeRegistryStore(persistence_path=str(storage_file))
+        target_keeper = RegistryKeeper(store=target_store, repo_root=str(dest_dir))
+        target_mapper = StructureMapper(store=target_store, repo_root=str(dest_dir))
+        target_linker = RelationshipLinker(store=target_store, repo_root=str(dest_dir))
+        target_dsm = DataServiceMapper(store=target_store, repo_root=str(dest_dir))
+
+        agent_logger.info("control", "ui_server", "github.ast_scan", f"Extracting AST nodes for {repo_name}...")
+        mapper_out, _ = target_mapper.map_and_register(registry_keeper=target_keeper, repo_shard=".")
+
+        agent_logger.info("control", "ui_server", "github.code_edges", f"Extracting call, import, and test edges...")
+        linker_out, _ = target_linker.link_and_register(registry_keeper=target_keeper)
+
+        agent_logger.info("control", "ui_server", "github.system_edges", f"Mapping APIs, DB tables, and queries...")
+        dsm_out, _ = target_dsm.map_and_register(registry_keeper=target_keeper)
+
+        with self._lock:
+            self.repo_root = dest_dir
+            self.store = target_store
+            self.orchestrator = OrchestratorAgent(registry_store=self.store, repo_root=str(dest_dir))
+
+        report_summary = None
+        if run_orchestration:
+            agent_logger.info("control", "ui_server", "github.orchestrating", f"Executing multi-agent audit on {repo_name}...")
+            plan_req = TaskPlanRequest(
+                task_title=f"Full Multi-Agent Audit for {repo_name}",
+                repo_root=str(dest_dir),
+                execution_mode=TaskExecutionMode.PARALLEL,
+                cost_budget_usd=10.0,
+            )
+            out = self.orchestrator.execute(plan_req)
+            self.latest_output = out.model_dump()
+            self._save_cached_report(self.latest_output)
+            if out.unified_report:
+                report_summary = {
+                    "overall_health_score": out.unified_report.overall_health_score,
+                    "findings_count": len(out.unified_report.ranked_findings),
+                    "remediations_count": len(out.unified_report.remediation_options),
+                }
+
+        return {
+            "success": True,
+            "repo_name": repo_name,
+            "repo_root": str(dest_dir),
+            "url": url,
+            "files_scanned": mapper_out.stats.get("files_scanned", 0),
+            "nodes_count": len(mapper_out.nodes),
+            "edges_count": len(linker_out.verified_edges),
+            "apis_count": len(dsm_out.api_nodes),
+            "tables_count": len(dsm_out.table_nodes),
+            "report_summary": report_summary,
+        }
+
 
 class MultiAgentRequestHandler(http.server.BaseHTTPRequestHandler):
     """Custom request handler dispatching REST API routes and serving static UI assets."""
@@ -429,6 +515,23 @@ class MultiAgentRequestHandler(http.server.BaseHTTPRequestHandler):
                 "record": res,
                 "message": f"Remediation option {opt_id} marked as {decision.upper()}",
             }).encode("utf-8"))
+            return
+
+        elif path == "/api/github-analyze":
+            url = req_data.get("url")
+            depth = int(req_data.get("depth", 1))
+            run_audit = bool(req_data.get("run_orchestration", True))
+            if not url:
+                self._set_headers(400, "application/json")
+                self.wfile.write(json.dumps({"error": "Missing 'url' field"}).encode("utf-8"))
+                return
+            try:
+                result = self.server_app.analyze_github_repo(url=url, depth=depth, run_orchestration=run_audit)
+                self._set_headers(200, "application/json")
+                self.wfile.write(json.dumps(result).encode("utf-8"))
+            except Exception as e:
+                self._set_headers(500, "application/json")
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
             return
 
         self._set_headers(404, "application/json")

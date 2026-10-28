@@ -215,11 +215,18 @@ def build_parser() -> argparse.ArgumentParser:
     logs_parser.add_argument("--level", default=None, help="Filter by level (INFO, WARNING, ERROR)")
     logs_parser.add_argument("--raw", action="store_true", help="Print raw JSON format")
 
-    # test-github
-    gh_parser = subparsers.add_parser("test-github", parents=[common_parser], help="Clone and run Structure Mapper + Registry Keeper on a real GitHub repository")
-    gh_parser.add_argument("github_url", help="GitHub repository URL (e.g. 'https://github.com/psf/requests' or any public repo)")
-    gh_parser.add_argument("--dest", default=None, help="Local directory to clone into (default: repos/<repo-name>)")
-    gh_parser.add_argument("--depth", type=int, default=1, help="Git clone depth (default: 1 for fast cloning)")
+    # test-github / analyze-github
+    for gh_cmd in ("test-github", "analyze-github"):
+        gh_parser = subparsers.add_parser(
+            gh_cmd,
+            parents=[common_parser],
+            help="Clone any GitHub repository and perform full multi-agent audit and graph mapping",
+        )
+        gh_parser.add_argument("github_url", help="GitHub repository URL (e.g. 'https://github.com/psf/requests' or any public repo)")
+        gh_parser.add_argument("--dest", default=None, help="Local directory to clone into (default: repos/<repo-name>)")
+        gh_parser.add_argument("--depth", type=int, default=1, help="Git clone depth (default: 1 for fast cloning)")
+        gh_parser.add_argument("--ui", action="store_true", help="Launch interactive visual web dashboard immediately after analysis")
+        gh_parser.add_argument("--port", type=int, default=8080, help="Port to serve UI on when --ui is enabled (default: 8080)")
 
     return parser
 
@@ -904,7 +911,7 @@ def main():
         except KeyboardInterrupt:
             print("\n🛑 Shutting down dashboard server.")
 
-    elif args.command == "test-github":
+    elif args.command in ("test-github", "analyze-github"):
         url = args.github_url
         repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
         dest_dir = Path(args.dest) if args.dest else Path("repos") / repo_name
@@ -1040,6 +1047,23 @@ def main():
         print(f"   • Saved to: {storage_file}")
 
         print(f"\n🎉 SUCCESS: All 14 Multi-Agent platform agents (Registry Keeper, Structure Mapper, Relationship Linker, Data & Service Mapper, Impact Analyzer, Architecture Review, Code Quality, Security, Company Rules, Observability, Scale & Load, Tech Scout, Test Generation, Cost & Token Governor) successfully processed real GitHub repository {url}!")
+
+        if getattr(args, "ui", False):
+            from ui.server import run_server
+            print(f"\n🌐 Launching Multi-Agent Interactive Dashboard for {repo_name} on http://127.0.0.1:{args.port}...")
+            server = run_server(
+                repo_root=str(dest_dir),
+                storage_path=str(storage_file),
+                port=args.port,
+                open_browser=True,
+            )
+            print(f"✨ Dashboard active! Point your browser to http://127.0.0.1:{args.port}")
+            print(f"   (Press Ctrl+C to terminate server)")
+            try:
+                if server.httpd:
+                    server.httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("\n🛑 Shutting down dashboard server.")
 
 
 

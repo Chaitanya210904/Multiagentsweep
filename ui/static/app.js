@@ -18,6 +18,7 @@ class DashboardApp {
   async init() {
     this.bindNavigation();
     this.bindAuditModal();
+    this.bindGithubModal();
 
     // Initialize graph engine
     const canvas = document.getElementById('graphCanvas');
@@ -443,6 +444,98 @@ class DashboardApp {
         } finally {
           triggerBtn.disabled = false;
           triggerBtn.innerText = 'Launch Orchestration';
+        }
+      });
+    }
+  }
+
+  // ---------------- GitHub Modal ----------------
+  bindGithubModal() {
+    const modal = document.getElementById('githubModal');
+    const openBtn = document.getElementById('btnOpenGithubModal');
+    const closeBtn = document.getElementById('btnCloseGithubModal');
+    const cancelBtn = document.getElementById('btnCancelGithub');
+    const form = document.getElementById('githubForm');
+    const statusMsg = document.getElementById('githubStatusMsg');
+    const submitBtn = document.getElementById('btnSubmitGithub');
+
+    const closeModal = () => {
+      modal.style.display = 'none';
+      if (statusMsg) {
+        statusMsg.style.display = 'none';
+        statusMsg.innerHTML = '';
+      }
+    };
+
+    if (openBtn) openBtn.addEventListener('click', () => { modal.style.display = 'flex'; });
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+    if (form) {
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const url = document.getElementById('githubUrl').value.trim();
+        const depth = parseInt(document.getElementById('githubDepth').value, 10) || 1;
+        const runAudit = document.getElementById('githubRunAudit').checked;
+
+        submitBtn.disabled = true;
+        submitBtn.innerText = '⏳ Processing Repo...';
+
+        statusMsg.style.display = 'block';
+        statusMsg.style.background = 'rgba(0, 240, 255, 0.08)';
+        statusMsg.style.border = '1px solid rgba(0, 240, 255, 0.25)';
+        statusMsg.style.color = '#00f0ff';
+        statusMsg.innerHTML = `
+          <div>🔄 <strong>Cloning repository & running Multi-Agent pipeline...</strong></div>
+          <div style="font-size:0.75rem; color:#94a3b8; margin-top:0.3rem;">
+            1. Git clone & shallow checkout<br>
+            2. Structure Mapper AST indexing<br>
+            3. Relationship Linker code edges<br>
+            4. Data & Service Mapper APIs & DBs<br>
+            ${runAudit ? '5. Autonomous 16-Agent Audit (Quality, Security, Critic)' : ''}
+          </div>
+        `;
+
+        try {
+          const res = await fetch('/api/github-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, depth, run_orchestration: runAudit }),
+          });
+
+          const data = await res.json();
+          if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to analyze repository');
+          }
+
+          statusMsg.style.background = 'rgba(16, 185, 129, 0.1)';
+          statusMsg.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+          statusMsg.style.color = '#10b981';
+          statusMsg.innerHTML = `
+            <div>✅ <strong>Successfully analyzed ${data.repo_name}!</strong></div>
+            <div style="font-size:0.75rem; color:#cbd5e1; margin-top:0.25rem;">
+              • Scanned Files: ${data.files_scanned || 0}<br>
+              • Code Entities: ${data.nodes_count || 0}<br>
+              • Code Edges: ${data.edges_count || 0}<br>
+              • APIs / DBs: ${data.apis_count || 0} / ${data.tables_count || 0}
+            </div>
+          `;
+
+          await this.refreshAll();
+
+          setTimeout(() => {
+            closeModal();
+            this.switchTab('graph');
+          }, 1400);
+
+        } catch (err) {
+          statusMsg.style.background = 'rgba(239, 68, 68, 0.1)';
+          statusMsg.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          statusMsg.style.color = '#ef4444';
+          statusMsg.innerHTML = `❌ <strong>Error:</strong> ${err.message || err}`;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Clone & Analyze';
         }
       });
     }

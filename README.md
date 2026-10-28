@@ -648,25 +648,28 @@ The multi-agent platform can be executed directly from the terminal against any 
 # 1. Launch Interactive Visual Web Dashboard & Force-Directed Graph UI
 python -m agents.graph.cli ui --port 8080
 
-# 2. Orchestrate complete codebase review across all layers (with Governor & Critic)
+# 2. Clone & analyze any public GitHub repo with full 16-agent audit and launch UI
+python -m agents.graph.cli analyze-github https://github.com/psf/requests --ui
+
+# 3. Orchestrate complete codebase review across all layers (with Governor & Critic)
 python -m agents.graph.cli orchestrate --title "Full Multi-Agent Codebase Audit" --budget 10.0
 
-# 3. Run parallel multi-agent dispatch on target files
+# 4. Run parallel multi-agent dispatch on target files
 python -m agents.graph.cli orchestrate --parallel --target-files src/main.py
 
-# 4. Grant operator approval for synthesized remediations
+# 5. Grant operator approval for synthesized remediations
 python -m agents.graph.cli orchestrate --approve
 
-# 5. Check enterprise company rules & cite rule IDs
+# 6. Check enterprise company rules & cite rule IDs
 python -m agents.graph.cli check-rules --fail-on high
 
-# 6. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
+# 7. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
 python -m agents.graph.cli scan --repo .
 
-# 7. Reconcile against git diff on commit or working tree
+# 8. Reconcile against git diff on commit or working tree
 python -m agents.graph.cli sync
 
-# 8. View historical audit change logs & structured agent traces
+# 9. View historical audit change logs & structured agent traces
 python -m agents.graph.cli logs --limit 20
 ```
 
@@ -675,6 +678,6 @@ python -m agents.graph.cli logs --limit 20
 ## Running Test Suite
 
 ```bash
-# Run all 131 tests across all 19 test files
+# Run all 132 tests across all 19 test files
 PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```

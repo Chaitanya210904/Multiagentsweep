@@ -156,3 +156,46 @@ def test_ui_server_human_approval_api(test_server):
         approvals = json.loads(resp.read().decode("utf-8"))
         assert "OPT-001" in approvals
         assert approvals["OPT-001"]["decision"] == "APPROVE"
+
+
+def test_ui_server_github_analyze_api(test_server):
+    """Verifies that the server handles GitHub repository cloning and analysis requests."""
+    base_url, app = test_server
+
+    # 1. Invalid URL validation
+    bad_req = urllib.request.Request(
+        f"{base_url}/api/github-analyze",
+        data=json.dumps({"url": "ftp://bad-protocol.com/repo"}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(bad_req) as resp:
+            pass
+        assert False, "Should have returned 500 error for invalid git URL"
+    except urllib.error.HTTPError as err:
+        assert err.code == 500
+        body = json.loads(err.read().decode("utf-8"))
+        assert "Invalid git repository URL" in body.get("error", "")
+
+    # 2. Analyze existing repos/bottle
+    valid_payload = json.dumps({
+        "url": "https://github.com/bottlepy/bottle",
+        "depth": 1,
+        "run_orchestration": False,
+    }).encode("utf-8")
+
+    good_req = urllib.request.Request(
+        f"{base_url}/api/github-analyze",
+        data=valid_payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(good_req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+
+    assert data["success"] is True
+    assert data["repo_name"] == "bottle"
+    assert data["nodes_count"] > 0
+    assert "repos/bottle" in data["repo_root"]
