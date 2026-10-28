@@ -9,7 +9,7 @@ Implements SonarQube static code quality model:
 import ast
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from models.code_quality import FindingSeverity, QualityFinding, QualityFindingCategory
 

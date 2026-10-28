@@ -8,7 +8,7 @@ Access: read-only
 from datetime import datetime, timezone
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from agents.base import AgentMetadata, BaseAgent
 from models.impact import (
