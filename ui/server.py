@@ -142,6 +142,7 @@ class MultiAgentUIServer:
 
         return {
             "status": "online",
+            "repo_name": self.repo_root.name,
             "repo_root": str(self.repo_root),
             "storage_path": str(self.store.persistence_path or ":memory:"),
             "total_nodes": len(all_nodes),

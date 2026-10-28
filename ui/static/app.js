@@ -130,8 +130,10 @@ class DashboardApp {
     }
   }
 
-  // ---------------- Render Views ----------------
   renderStatus(data) {
+    const repoBadge = document.getElementById('currentRepoBadge');
+    if (repoBadge) repoBadge.innerText = data.repo_name || 'multiagent';
+
     const totalNodesEl = document.getElementById('metricTotalNodes');
     if (totalNodesEl) totalNodesEl.innerText = data.total_nodes.toLocaleString();
 
@@ -471,21 +473,17 @@ class DashboardApp {
     if (closeBtn) closeBtn.addEventListener('click', closeModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
 
-    if (form) {
-      form.addEventListener('submit', async e => {
-        e.preventDefault();
-        const url = document.getElementById('githubUrl').value.trim();
-        const depth = parseInt(document.getElementById('githubDepth').value, 10) || 1;
-        const runAudit = document.getElementById('githubRunAudit').checked;
+    const executeAnalysis = async (url, depth, runAudit, statusEl, btnEl, onComplete) => {
+      btnEl.disabled = true;
+      const originalText = btnEl.innerText;
+      btnEl.innerText = '⏳ Processing Repo...';
 
-        submitBtn.disabled = true;
-        submitBtn.innerText = '⏳ Processing Repo...';
-
-        statusMsg.style.display = 'block';
-        statusMsg.style.background = 'rgba(0, 240, 255, 0.08)';
-        statusMsg.style.border = '1px solid rgba(0, 240, 255, 0.25)';
-        statusMsg.style.color = '#00f0ff';
-        statusMsg.innerHTML = `
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.background = 'rgba(0, 240, 255, 0.08)';
+        statusEl.style.border = '1px solid rgba(0, 240, 255, 0.25)';
+        statusEl.style.color = '#00f0ff';
+        statusEl.innerHTML = `
           <div>🔄 <strong>Cloning repository & running Multi-Agent pipeline...</strong></div>
           <div style="font-size:0.75rem; color:#94a3b8; margin-top:0.3rem;">
             1. Git clone & shallow checkout<br>
@@ -495,23 +493,25 @@ class DashboardApp {
             ${runAudit ? '5. Autonomous 16-Agent Audit (Quality, Security, Critic)' : ''}
           </div>
         `;
+      }
 
-        try {
-          const res = await fetch('/api/github-analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, depth, run_orchestration: runAudit }),
-          });
+      try {
+        const res = await fetch('/api/github-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, depth, run_orchestration: runAudit }),
+        });
 
-          const data = await res.json();
-          if (!res.ok || data.error) {
-            throw new Error(data.error || 'Failed to analyze repository');
-          }
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || 'Failed to analyze repository');
+        }
 
-          statusMsg.style.background = 'rgba(16, 185, 129, 0.1)';
-          statusMsg.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-          statusMsg.style.color = '#10b981';
-          statusMsg.innerHTML = `
+        if (statusEl) {
+          statusEl.style.background = 'rgba(16, 185, 129, 0.1)';
+          statusEl.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+          statusEl.style.color = '#10b981';
+          statusEl.innerHTML = `
             <div>✅ <strong>Successfully analyzed ${data.repo_name}!</strong></div>
             <div style="font-size:0.75rem; color:#cbd5e1; margin-top:0.25rem;">
               • Scanned Files: ${data.files_scanned || 0}<br>
@@ -520,23 +520,50 @@ class DashboardApp {
               • APIs / DBs: ${data.apis_count || 0} / ${data.tables_count || 0}
             </div>
           `;
-
-          await this.refreshAll();
-
-          setTimeout(() => {
-            closeModal();
-            this.switchTab('graph');
-          }, 1400);
-
-        } catch (err) {
-          statusMsg.style.background = 'rgba(239, 68, 68, 0.1)';
-          statusMsg.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-          statusMsg.style.color = '#ef4444';
-          statusMsg.innerHTML = `❌ <strong>Error:</strong> ${err.message || err}`;
-        } finally {
-          submitBtn.disabled = false;
-          submitBtn.innerText = 'Clone & Analyze';
         }
+
+        await this.refreshAll();
+
+        setTimeout(() => {
+          if (onComplete) onComplete();
+          this.switchTab('graph');
+        }, 1400);
+
+      } catch (err) {
+        if (statusEl) {
+          statusEl.style.background = 'rgba(239, 68, 68, 0.1)';
+          statusEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          statusEl.style.color = '#ef4444';
+          statusEl.innerHTML = `❌ <strong>Error:</strong> ${err.message || err}`;
+        }
+      } finally {
+        btnEl.disabled = false;
+        btnEl.innerText = originalText;
+      }
+    };
+
+    if (form) {
+      form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const url = document.getElementById('githubUrl').value.trim();
+        const depth = parseInt(document.getElementById('githubDepth').value, 10) || 1;
+        const runAudit = document.getElementById('githubRunAudit').checked;
+        await executeAnalysis(url, depth, runAudit, statusMsg, submitBtn, closeModal);
+      });
+    }
+
+    const topForm = document.getElementById('topGithubForm');
+    const topInput = document.getElementById('topGithubUrl');
+    const topStatus = document.getElementById('topGithubStatus');
+    const topBtn = document.getElementById('btnTopSubmitGithub');
+
+    if (topForm) {
+      topForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const url = topInput.value.trim();
+        await executeAnalysis(url, 1, true, topStatus, topBtn, () => {
+          if (topStatus) setTimeout(() => { topStatus.style.display = 'none'; }, 5000);
+        });
       });
     }
   }

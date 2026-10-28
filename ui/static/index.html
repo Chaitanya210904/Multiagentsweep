@@ -52,6 +52,25 @@
 
     <!-- TAB 1: OVERVIEW -->
     <section class="tab-pane active" id="tab-dashboard">
+      <!-- Target Repository Bar -->
+      <div class="glass-panel" style="margin-bottom: 1.5rem; padding: 1.25rem 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.04), rgba(0, 240, 255, 0.05)); border: 1px solid rgba(0, 240, 255, 0.25);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.75rem;">
+          <div style="display:flex; align-items:center; gap:0.6rem;">
+            <span style="font-size:1.25rem;">📦</span>
+            <span style="font-weight:700; font-size:1rem; color:#fff;">Target GitHub Repository</span>
+            <span class="badge badge-control" id="currentRepoBadge">multiagent</span>
+          </div>
+          <span style="font-size:0.8rem; color:#94a3b8;">Enter any public GitHub URL to clone, index & audit fresh</span>
+        </div>
+        <form id="topGithubForm" style="display:flex; gap:0.75rem; align-items:center;">
+          <input type="url" class="form-input" id="topGithubUrl" placeholder="https://github.com/owner/repository (e.g. https://github.com/psf/requests)" style="flex:1; padding:0.65rem 1rem; font-size:0.92rem;" required>
+          <button type="submit" class="btn-primary" id="btnTopSubmitGithub" style="white-space:nowrap; padding:0.65rem 1.4rem;">
+            <span>🚀</span> Clone & Analyze Repository
+          </button>
+        </form>
+        <div id="topGithubStatus" style="display:none; margin-top:0.75rem; padding:0.65rem 0.85rem; border-radius:6px; font-size:0.82rem; font-family:var(--font-mono); line-height:1.5;"></div>
+      </div>
+
       <!-- Metric Strip -->
       <div class="metric-grid">
         <div class="metric-card">
