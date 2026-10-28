@@ -126,6 +126,17 @@ from .company_rules import (
     CompanyRulesInput,
     CompanyRulesOutput,
 )
+from .control import (
+    TaskExecutionMode,
+    SubTaskStatus,
+    FindingCategory,
+    NormalizedSeverity,
+    CriticFinding,
+    OrchestratorSubTask,
+    TaskPlanRequest,
+    UnifiedReport,
+    OrchestratorOutput,
+)
 
 __all__ = [
     "NodeType",
@@ -228,6 +239,15 @@ __all__ = [
     "RuleViolation",
     "CompanyRulesInput",
     "CompanyRulesOutput",
+    "TaskExecutionMode",
+    "SubTaskStatus",
+    "FindingCategory",
+    "NormalizedSeverity",
+    "CriticFinding",
+    "OrchestratorSubTask",
+    "TaskPlanRequest",
+    "UnifiedReport",
+    "OrchestratorOutput",
 ]
 
 

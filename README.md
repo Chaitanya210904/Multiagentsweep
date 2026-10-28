@@ -3,7 +3,9 @@
 A distributed, layered multi-agent platform for automated codebase comprehension, verification, and transformation.
 
 ## Layer Overview
-1. **Control Layer**: Orchestrator, Aggregator + Critic
+1. **Control Layer**:
+   - `orchestrator` (**Orchestrator Agent: Master Coordinator & Planner**) - *Implemented*
+   - `result_aggregator_critic` (**Result Aggregator & Critic: Consolidator & Quality Gate**) - *Implemented*
 2. **Graph Layer**:
    - `registry_keeper` (**Registry Keeper (the list)**) - *Implemented*
    - `structure_mapper` (**Structure Mapper: nodes**) - *Implemented*
@@ -28,6 +30,70 @@ A distributed, layered multi-agent platform for automated codebase comprehension
    - `test_generation` (**Test Generation: Test writer**) - *Implemented*
    - `cost_token_governor` (**Cost & Token Governor: Budget controller**) - *Implemented*
    - Documentation, Rollback/Release
+
+---
+
+## Agent Specification: Orchestrator Agent (`orchestrator`)
+
+| Field | Value |
+|---|---|
+| **ID** | `orchestrator` |
+| **Name** | Orchestrator Agent |
+| **Layer** | `control` |
+| **Role** | Master Coordinator & Planner |
+| **Description** | Breaks down tasks, chooses agents, delegates subtasks, coordinates with governor, calls critic, and enforces Human-in-the-Loop gate. |
+| **Access** | `read-only` (strictly coordinates read-only workflows; cannot modify code without human consent) |
+| **Model Tier** | `large` |
+| **Trigger** | `on user request or workflow event` |
+| **Optional** | `false` |
+
+### Inputs
+- `task_request`: High-level goal (`TaskPlanRequest`), target files, budget constraints, policy docs, and execution mode (`sequential` or `parallel`).
+- `graph_context`: Code Registry topology and system edges.
+- `governor_routing`: Model tier routing decisions and token budgets from `cost_token_governor`.
+
+### Outputs
+- `orchestration_output`: Final status (`AWAITING_APPROVAL`, `COMPLETED`), executed subtasks with statuses and durations, governor financial summary, and unified critic report.
+- `subtask_plan`: DAG of scheduled subtasks with prerequisite dependencies and error recovery retries.
+
+### Tools
+- `orchestrator.plan`: Decomposes user goals into structured subtasks with clear dependencies and agent assignments.
+- `orchestrator.dispatch`: Dispatches tasks to specialist agents sequentially or in parallel threads with automatic retry and error handling.
+- `critic.invoke`: Delegates raw specialist findings to the Result Aggregator & Critic for consolidation.
+- `governor.consult`: Passes execution plans to the Cost & Token Governor for token bounds and model tier routing.
+
+---
+
+## Agent Specification: Result Aggregator & Critic (`result_aggregator_critic`)
+
+| Field | Value |
+|---|---|
+| **ID** | `result_aggregator_critic` |
+| **Name** | Result Aggregation & Critic |
+| **Layer** | `control` |
+| **Role** | Consolidator & Quality Gate |
+| **Description** | Combines findings from all specialist agents, removes false alarms, resolves conflicts, and ranks options by impact. |
+| **Access** | `read-only` (pure evaluation and consolidation engine) |
+| **Model Tier** | `medium` |
+| **Trigger** | `after specialist agents complete` |
+| **Optional** | `false` |
+
+### Inputs
+- `specialist_outputs`: Heterogeneous output payloads from Security, Quality, Architecture, Safety, Runtime, and Optional agents.
+- `impact_data`: Blast radius metrics and affected dependency neighbors from Impact Analyzer.
+- `target_files`: Active files in scope for stale finding detection.
+
+### Outputs
+- `unified_report`: Consolidated `UnifiedReport` with system health score, executive summary, active finding counts, and domain health breakdown.
+- `ranked_findings`: Active verified findings ranked descending by composite impact score:
+  $$\text{Impact} = (\text{Severity Weight} \times 0.4) + (\text{Blast Radius} \times 0.3) + (\text{Confidence} \times 30.0)$$
+- `pruned_findings`: Suppressed duplicate findings and stale reports targeting deleted/non-existent code.
+- `remediation_options`: Actionable, structured remediation proposals presented for Human-in-the-Loop selection.
+
+### Tools
+- `critic.deduplicate`: Pinpoints location keys `(file_path, line_number)` and rule types to prune redundant findings across tools (e.g. Semgrep vs Gitleaks vs Company Rules).
+- `critic.rank`: Computes composite impact scores incorporating architectural blast radius and CVSS/rule severity.
+- `registry.lookup`: Cross-references candidate finding locations against active AST nodes in the Code Registry.
 
 ---
 
@@ -569,29 +635,29 @@ multiagent/
 
 ## Production CLI Usage
 
-The Registry Keeper can be executed directly from the terminal against any real repository:
+The multi-agent platform can be executed directly from the terminal against any real repository:
 
 ```bash
-# 1. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
+# 1. Orchestrate complete codebase review across all layers (with Governor & Critic)
+python -m agents.graph.cli orchestrate --title "Full Multi-Agent Codebase Audit" --budget 10.0
+
+# 2. Run parallel multi-agent dispatch on target files
+python -m agents.graph.cli orchestrate --parallel --target-files src/main.py
+
+# 3. Grant operator approval for synthesized remediations
+python -m agents.graph.cli orchestrate --approve
+
+# 4. Check enterprise company rules & cite rule IDs
+python -m agents.graph.cli check-rules --fail-on high
+
+# 5. Scan a real codebase (indexes files, classes, and functions with SHA-256 hashes)
 python -m agents.graph.cli scan --repo .
 
-# 2. View registry status & entity breakdown
-python -m agents.graph.cli status
-
-# 3. List tracked entities filtered by type
-python -m agents.graph.cli list --type function
-
-# 4. Lookup a specific canonical entity by ID
-python -m agents.graph.cli get "func:agents/graph/registry_keeper.py:RegistryKeeper.execute"
-
-# 5. Reconcile against git diff on commit or working tree
+# 6. Reconcile against git diff on commit or working tree
 python -m agents.graph.cli sync
 
-# 6. View historical audit change logs
-python -m agents.graph.cli log --limit 10
-
-# 7. Apply proposals from a JSON file
-python -m agents.graph.cli apply /path/to/proposals.json
+# 7. View historical audit change logs & structured agent traces
+python -m agents.graph.cli logs --limit 20
 ```
 
 ---
@@ -599,5 +665,6 @@ python -m agents.graph.cli apply /path/to/proposals.json
 ## Running Test Suite
 
 ```bash
-PYTHONPATH=. .venv/bin/pytest tests/test_registry_keeper.py -v
+# Run all 127 tests across all 18 test files
+PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```

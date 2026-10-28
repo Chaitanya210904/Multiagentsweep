@@ -38,6 +38,14 @@ from .runtime import (
     TechScoutAgent,
     TechScout,
 )
+from .control import (
+    ORCHESTRATOR_METADATA,
+    OrchestratorAgent,
+    Orchestrator,
+    CRITIC_METADATA,
+    ResultAggregatorCriticAgent,
+    ResultAggregatorCritic,
+)
 from .optional import (
     TEST_GENERATION_METADATA,
     TestGenerationAgent,
@@ -85,5 +93,11 @@ __all__ = [
     "COST_TOKEN_GOVERNOR_METADATA",
     "CostTokenGovernorAgent",
     "CostTokenGovernor",
+    "ORCHESTRATOR_METADATA",
+    "OrchestratorAgent",
+    "Orchestrator",
+    "CRITIC_METADATA",
+    "ResultAggregatorCriticAgent",
+    "ResultAggregatorCritic",
 ]
 

@@ -25,7 +25,10 @@ from agents.runtime.scale_load_agent import ScaleLoadAgent
 from agents.runtime.tech_scout_agent import TechScoutAgent
 from agents.optional.test_generation_agent import TestGenerationAgent
 from agents.optional.cost_token_governor_agent import CostTokenGovernorAgent
+from agents.control.orchestrator import OrchestratorAgent, Orchestrator
+from agents.control.critic import ResultAggregatorCriticAgent, ResultAggregatorCritic
 from core.logger import AgentLogger, agent_logger
+from models.control import TaskExecutionMode, TaskPlanRequest
 from models.architecture import ArchitectureReviewInput
 from models.code_quality import CodeQualityInput
 from models.company_rules import CompanyRulesInput, RuleSeverity
@@ -188,6 +191,15 @@ def build_parser() -> argparse.ArgumentParser:
     cr_parser.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"], default="high", help="Minimum severity threshold to trigger failure (default: high)")
 
 
+
+    # orchestrate (Orchestrator & Critic Engine)
+    orch_parser = subparsers.add_parser("orchestrate", parents=[common_parser], help="Orchestrator Agent coordinates workflows, plans subtasks, queries Governor, runs specialist agents, calls Critic, and enforces Human-in-the-Loop gate")
+    orch_parser.add_argument("--title", default="Codebase Health and Security Audit", help="Title of orchestration task")
+    orch_parser.add_argument("--description", default="", help="Detailed description of the task")
+    orch_parser.add_argument("--target-files", nargs="*", default=None, help="Specific target files in scope")
+    orch_parser.add_argument("--parallel", action="store_true", help="Execute independent subtasks concurrently")
+    orch_parser.add_argument("--budget", type=float, default=None, help="Cost budget ceiling in USD for token governor")
+    orch_parser.add_argument("--approve", action="store_true", help="Operator approves synthesized remediations and changes")
 
     # agent logs
     logs_parser = subparsers.add_parser("logs", parents=[common_parser], help="Display structured agent execution and milestone logs")
@@ -785,6 +797,88 @@ def main():
                 if v.code_snippet:
                     print(f"     Snippet: {v.code_snippet}")
                 print(f"     Remediation: {v.remediation}")
+
+    elif args.command == "orchestrate":
+        orch = OrchestratorAgent(repo_root=args.repo)
+        plan_req = TaskPlanRequest(
+            task_title=args.title,
+            user_prompt=args.description,
+            target_files=args.target_files or [],
+            budget_limit_usd=args.budget,
+            require_human_approval=not args.approve,
+            repo_root=args.repo,
+        )
+
+        exec_mode_str = "PARALLEL" if args.parallel else "SEQUENTIAL"
+        print(f"🧠 [ORCHESTRATOR] Initiating master orchestration: '{plan_req.task_title}'...")
+        print(f"   • Execution mode: {exec_mode_str}")
+        if plan_req.budget_limit_usd:
+            print(f"   • Governor Budget Ceiling: ${plan_req.budget_limit_usd:.2f} USD")
+        if plan_req.target_files:
+            print(f"   • Target Files: {', '.join(plan_req.target_files)}")
+
+        out = orch.execute(plan_req)
+
+        status_tag = f"⏸️  {out.status}" if out.status == "AWAITING_APPROVAL" else f"✅ {out.status}"
+        print(f"\n========================================================")
+        print(f"🎯 ORCHESTRATION OUTCOME: {status_tag}")
+        print(f"========================================================")
+        print(f"   • Human Approval Required: {out.human_approval_required}")
+        print(f"   • Subtasks Scheduled & Executed: {len(out.subtasks)}")
+        for st in out.subtasks:
+            st_icon = "✅" if st.status.value == "completed" else "❌"
+            print(f"     [{st_icon}] {st.subtask_id}: {st.description} (Agent: {st.agent_id})")
+
+        rep = out.unified_report
+        if rep:
+            print(f"\n🛡️  UNIFIED CRITIC HEALTH REPORT:")
+            print(f"   • System Health Score: {rep.overall_health_score}/100.0")
+            print(f"   • Findings Detected: {rep.total_findings_detected}")
+            print(f"   • False Alarms Pruned: {rep.false_alarms_pruned}")
+            print(f"   • Active Verified Findings: {rep.active_findings_count}")
+            print(f"     - Critical: {rep.critical_count}")
+            print(f"     - High: {rep.high_count}")
+            print(f"     - Medium: {rep.medium_count}")
+            print(f"     - Low: {rep.low_count}")
+            print(f"     - Info: {rep.info_count}")
+
+            if rep.pruned_findings:
+                print(f"\n🧹 Pruned False Alarms & Duplicates:")
+                for pf in rep.pruned_findings[:5]:
+                    print(f"   • [PRUNED] {pf.title} ({pf.source_agent}) -> Reason: {pf.suppression_reason}")
+
+            if rep.ranked_findings:
+                print(f"\n🏆 Top Impact-Ranked Active Findings:")
+                for rf in rep.ranked_findings[:8]:
+                    loc = f"{rf.file_path}:{rf.line_number}" if rf.line_number else (rf.file_path or "N/A")
+                    print(f"   • [Impact {rf.impact_score:.1f}] [{rf.severity.value.upper()}] {rf.title} ({rf.source_agent}) at {loc}")
+                    print(f"     Remediation: {rf.remediation_proposal}")
+
+            if rep.remediation_options:
+                print(f"\n💡 Synthesized Remediation Proposals (Pending Human Operator Consent):")
+                for opt in rep.remediation_options:
+                    opt_id = opt.get("option_id", "OPT")
+                    title = opt.get("title", "")
+                    sev = opt.get("severity", "MEDIUM")
+                    impact = opt.get("impact_score", 0.0)
+                    action = opt.get("action", "")
+                    target = opt.get("target_file", "")
+                    line = f":{opt.get('line_number')}" if opt.get("line_number") else ""
+                    print(f"   • [{sev}] Option {opt_id} (Impact {impact:.1f}): {title}")
+                    if target:
+                        print(f"     Target: {target}{line}")
+                    print(f"     Action: {action}")
+
+        print(f"\n💰 GOVERNOR SUMMARY:")
+        print(f"   • Cumulative Tokens: {out.total_tokens_consumed:,} tokens")
+        print(f"   • Financial Cost: ${out.total_cost_usd:.4f} USD")
+
+        if out.human_approval_required and not args.approve:
+            print(f"\n🛑 HUMAN-IN-THE-LOOP SAFETY GATE ACTIVE:")
+            print(f"   All automated code edits and test generation writes remain BLOCKED pending human consent.")
+            print(f"   Review proposals above and re-run with '--approve' to grant authorization.")
+        elif args.approve:
+            print(f"\n🟢 OPERATOR CONSENT GRANTED: Remediation tasks authorized for execution.")
 
     elif args.command == "test-github":
         url = args.github_url
